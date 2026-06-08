@@ -280,9 +280,9 @@ export const isAtcProposal = (x: unknown): x is AtcProposal => {
   )
     return false
   if (!isAtcRestriction(o.restriction)) return false
-  if (o.apprIsArea !== undefined && !isStr(o.apprIsArea)) return false
-  if (o.checkClass !== undefined && !isStr(o.checkClass)) return false
-  if (o.validUntil !== undefined && !isStr(o.validUntil)) return false
+  if ("apprIsArea" in o && !isStr((o as any).apprIsArea)) return false
+  if ("checkClass" in o && !isStr((o as any).checkClass)) return false
+  if ("validUntil" in o && !isStr((o as any).validUntil)) return false
   return true
 }
 

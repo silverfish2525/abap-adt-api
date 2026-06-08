@@ -104,7 +104,7 @@ const isExtendedDataRaw = (x: unknown): x is ExtendedDataRaw => {
     isStr(o.system) &&
     isNum(o.client) &&
     isBool(o.isAggregated) &&
-    (o.aggregationKind === undefined || isStr(o.aggregationKind)) &&
+    (!("aggregationKind" in o) || isStr((o as any).aggregationKind)) &&
     isStr(o.objectName) &&
     isXmlState(o.state)
   )
@@ -199,14 +199,14 @@ const isCallingProgramRaw = (x: unknown): x is CallingProgramRaw => {
   if (!isObject(x)) return false
   const o = x as Record<string, unknown>
   if (!isStr(o["@_context"]) || !isNum(o["@_byteCodeOffset"])) return false
-  if (o["@_uri"] !== undefined && !isStr(o["@_uri"])) return false
-  if (o["@_type"] !== undefined && !isStr(o["@_type"])) return false
-  if (o["@_name"] !== undefined && !isStr(o["@_name"])) return false
-  if (o["@_packageName"] !== undefined && !isStr(o["@_packageName"]))
+  if ("@_uri" in o && !isStr((o as any)["@_uri"])) return false
+  if ("@_type" in o && !isStr((o as any)["@_type"])) return false
+  if ("@_name" in o && !isStr((o as any)["@_name"])) return false
+  if ("@_packageName" in o && !isStr((o as any)["@_packageName"]))
     return false
   if (
-    o["@_objectReferenceQuery"] !== undefined &&
-    !isStr(o["@_objectReferenceQuery"])
+    "@_objectReferenceQuery" in o &&
+    !isStr((o as any)["@_objectReferenceQuery"])
   )
     return false
   return true
