@@ -123,6 +123,24 @@ export interface HttpClient {
   request: (options: HttpClientOptions) => Promise<HttpClientResponse>
 }
 
+/**
+ * Transport-agnostic interceptors registered on the {@link AdtHTTP} layer.
+ * They wrap the call to the underlying {@link HttpClient.request}, so they
+ * keep working if the HTTP transport ever changes (e.g. axios -> fetch).
+ */
+export type RequestInterceptor = (
+  options: HttpClientOptions
+) => HttpClientOptions | Promise<HttpClientOptions>
+
+export type ResponseInterceptor = (
+  response: HttpClientResponse,
+  options: HttpClientOptions
+) => HttpClientResponse | Promise<HttpClientResponse>
+
+export interface InterceptorHandle {
+  dispose(): void
+}
+
 export class HttpClientException extends Error {
   constructor(
     message: string,
@@ -156,6 +174,8 @@ export class AdtHTTP {
   private httpclient: HttpClient
   private debugCallback?: LogCallback
   private loginPromise?: Promise<HttpClientResponse>
+  private requestInterceptors: RequestInterceptor[] = []
+  private responseInterceptors: ResponseInterceptor[] = []
   get isStateful(): boolean {
     return (
       this.stateful === session_types.stateful ||
@@ -280,6 +300,37 @@ export class AdtHTTP {
       } else throw adtErr
     }
   }
+  /**
+   * Register a request interceptor. Interceptors run in registration order
+   * before the underlying HTTP call. Each interceptor can return a modified
+   * options object (or a promise of one). Throwing aborts the request, which
+   * propagates to the caller as today's errors do.
+   */
+  addRequestInterceptor(fn: RequestInterceptor): InterceptorHandle {
+    this.requestInterceptors.push(fn)
+    return {
+      dispose: () => {
+        const i = this.requestInterceptors.indexOf(fn)
+        if (i >= 0) this.requestInterceptors.splice(i, 1)
+      }
+    }
+  }
+
+  /**
+   * Register a response interceptor. Interceptors run in registration order
+   * after the underlying HTTP call returns. Each can return a modified
+   * response (or a promise of one). Throwing propagates as today's errors do.
+   */
+  addResponseInterceptor(fn: ResponseInterceptor): InterceptorHandle {
+    this.responseInterceptors.push(fn)
+    return {
+      dispose: () => {
+        const i = this.responseInterceptors.indexOf(fn)
+        if (i >= 0) this.responseInterceptors.splice(i, 1)
+      }
+    }
+  }
+
   private keep_session = async () => {
     if (this.needKeepalive && this.loggedin)
       await this._request("/sap/bc/adt/compatibility/graph", {}).catch(() => {})
@@ -338,7 +389,14 @@ export class AdtHTTP {
     try {
       if (this.getToken && !this.bearer) this.bearer = await this.getToken()
       if (this.bearer) headers.Authorization = `bearer ${this.bearer}`
-      const response = await this.httpclient.request(config)
+      let finalConfig: HttpClientOptions = config
+      for (const interceptor of this.requestInterceptors) {
+        finalConfig = await interceptor(finalConfig)
+      }
+      let response = await this.httpclient.request(finalConfig)
+      for (const interceptor of this.responseInterceptors) {
+        response = await interceptor(response, finalConfig)
+      }
 
       this.updateCookies(response)
       if (response.status >= 400) throw fromException(response, config)
