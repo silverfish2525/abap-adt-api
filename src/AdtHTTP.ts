@@ -128,10 +128,19 @@ export interface HttpClient {
  * They wrap the call to the underlying {@link HttpClient.request}, so they
  * keep working if the HTTP transport ever changes (e.g. axios -> fetch).
  */
+/**
+ * Function registered via {@link AdtHTTP.addRequestInterceptor}.
+ * It can read or modify outbound HTTP options before each request.
+ */
 export type RequestInterceptor = (
   options: HttpClientOptions
 ) => HttpClientOptions | Promise<HttpClientOptions>
 
+/**
+ * Function registered via {@link AdtHTTP.addResponseInterceptor}.
+ * It can read or modify HTTP responses after they arrive but before
+ * they are returned to the caller.
+ */
 export type ResponseInterceptor = (
   response: HttpClientResponse,
   options: HttpClientOptions
@@ -301,10 +310,16 @@ export class AdtHTTP {
     }
   }
   /**
-   * Register a request interceptor. Interceptors run in registration order
-   * before the underlying HTTP call. Each interceptor can return a modified
-   * options object (or a promise of one). Throwing aborts the request, which
-   * propagates to the caller as today's errors do.
+   * Register a function that can read or modify outbound HTTP options
+   * before each request. Interceptors run in registration order and are
+   * awaited sequentially. If an interceptor throws, the request is not
+   * sent and the error propagates to the caller.
+   *
+   * Use cases: auth-token injection, comm logging, request shaping.
+   *
+   * @returns a handle whose dispose() removes the interceptor. Long-lived
+   *   clients should dispose interceptors that are no longer needed to
+   *   avoid unbounded retention.
    */
   addRequestInterceptor(fn: RequestInterceptor): InterceptorHandle {
     this.requestInterceptors.push(fn)
@@ -317,9 +332,18 @@ export class AdtHTTP {
   }
 
   /**
-   * Register a response interceptor. Interceptors run in registration order
-   * after the underlying HTTP call returns. Each can return a modified
-   * response (or a promise of one). Throwing propagates as today's errors do.
+   * Register a function that can read or modify HTTP responses after they
+   * arrive but before they're returned to the caller. Runs in registration
+   * order, awaited sequentially.
+   *
+   * Note: response interceptors only fire on successful round-trips. They
+   * do NOT fire on transport-level failures (network errors, timeouts);
+   * those still propagate through the existing exception path. Retry-on-
+   * transport-failure is therefore not expressible via this API today.
+   *
+   * Use cases: response shaping, telemetry, comm logging on success/4xx/5xx.
+   *
+   * @returns a handle whose dispose() removes the interceptor.
    */
   addResponseInterceptor(fn: ResponseInterceptor): InterceptorHandle {
     this.responseInterceptors.push(fn)
