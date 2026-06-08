@@ -232,6 +232,14 @@ export interface TransportTarget {
 export interface TransportsOfUser {
   workbench: TransportTarget[]
   customizing: TransportTarget[]
+  /**
+   * Transport-of-copies bucket. Populated when the SAP server returns a
+   * `<tm:transportofcopies>` element (driven by the `TransportOfCopies`
+   * configuration property — see `CL_CTS_ADT_TM_CONFIG_HANDLER`). Older
+   * downstream code that constructs synthetic `TransportsOfUser` values
+   * may omit this field, which is why it is optional.
+   */
+  transportofcopies?: TransportTarget[]
 }
 const parseTask = (t: any) => {
   const task = {
@@ -280,7 +288,14 @@ export async function userTransports(h: AdtHTTP, user: string, targets = true) {
     "tm:target"
   ).map(parseTargets)
 
-  const retval: TransportsOfUser = { workbench, customizing }
+  const transportofcopies = xmlArray(
+    raw,
+    "tm:root",
+    "tm:transportofcopies",
+    "tm:target"
+  ).map(parseTargets)
+
+  const retval: TransportsOfUser = { workbench, customizing, transportofcopies }
   return retval
 }
 
@@ -305,7 +320,14 @@ export async function transportsByConfig(
     "tm:target"
   ).map(parseTargets)
 
-  const retval: TransportsOfUser = { workbench, customizing }
+  const transportofcopies = xmlArray(
+    raw,
+    "tm:root",
+    "tm:transportofcopies",
+    "tm:target"
+  ).map(parseTargets)
+
+  const retval: TransportsOfUser = { workbench, customizing, transportofcopies }
   return retval
 }
 
