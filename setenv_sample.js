@@ -13,9 +13,7 @@ process.env.ADT_GIT_PASS = "secret"
 
 // for connecting with cloud instances, like Cloud Platform Trial. Pretty hard to get the right values
 process.env.ADT_CP = JSON.stringify({
-  accessToken: "Oauth access token",
   refreshToken: "Oauth refresh token",
-  tokenType: "bearer",
   clientId: "your client ID",
   clientSecret: "Your client secret",
   uaaUrl: "your UAA Url",
@@ -23,5 +21,6 @@ process.env.ADT_CP = JSON.stringify({
   user: "Myusername",
   repopkg: "ZGITREPOPKG",
   repouser: "git repo user",
-  repopwd: "git repo password"
+  repopwd: "git repo password",
+  bindingName: "your service binding name"
 })

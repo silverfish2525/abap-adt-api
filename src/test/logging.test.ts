@@ -1,3 +1,4 @@
+import { expect, test } from "vitest"
 import { ADTClient, createSSLConfig, LogData, session_types } from ".."
 
 test("login", async () => {

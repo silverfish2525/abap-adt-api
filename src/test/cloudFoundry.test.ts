@@ -1,10 +1,20 @@
+import { expect, test } from "vitest"
 import { ADTClient } from "../AdtClient"
-import ClientOAuth2 from "client-oauth2"
 import { parseServiceBinding, servicePreviewUrl } from "../"
+
+type UaaTokenResponse = {
+  access_token?: string
+  token_type?: string
+  expires_in?: number
+  refresh_token?: string
+  scope?: string
+  jti?: string
+}
+
+const adtCp = process.env.ADT_CP ? JSON.parse(process.env.ADT_CP) : {}
+
 const {
-  accessToken = "",
   refreshToken = "",
-  tokenType = "",
   clientId = "",
   clientSecret = "",
   uaaUrl = "",
@@ -14,27 +24,40 @@ const {
   repouser = "",
   repopwd = "",
   bindingName = ""
-} = JSON.parse(process.env.ADT_CP || "") as { [key: string]: string }
+} = adtCp as { [key: string]: string }
 
 let oldToken: string = ""
 
 const fetchToken = async () => {
-  oldToken =
-    oldToken ||
-    (await new ClientOAuth2({
-      authorizationUri: `${uaaUrl}/oauth/authorize`,
-      accessTokenUri: `${uaaUrl}/oauth/token`,
-      redirectUri: "http://localhost/notfound",
-      clientId,
-      clientSecret
-    })
-      .createToken(accessToken, refreshToken, tokenType, {})
-      .refresh()
-      .then(t => t.accessToken))
+  oldToken = oldToken || await refreshAccessToken()
   return oldToken
 }
+
+const refreshAccessToken = async () => {
+  const response = await fetch(`${uaaUrl}/oauth/token`, {
+    method: "POST",
+    headers: {
+      Authorization: `Basic ${Buffer.from(`${clientId}:${clientSecret}`).toString("base64")}`,
+      "Content-Type": "application/x-www-form-urlencoded"
+    },
+    body: new URLSearchParams({
+      grant_type: "refresh_token",
+      refresh_token: refreshToken
+    })
+  })
+
+  if (!response.ok) {
+    throw new Error(`OAuth token refresh failed: ${response.status} ${response.statusText}`)
+  }
+
+  const token = await response.json() as UaaTokenResponse
+  if (!token.access_token) {
+    throw new Error("OAuth token refresh failed: missing access_token in response")
+  }
+
+  return token.access_token
+}
 test("abapgit repos on CF", async () => {
-  jest.setTimeout(10000) // this usually takes longer than the default 5000
   if (!clientId) return
   const client = new ADTClient(url, user, fetchToken)
   const repos = await client.gitRepos()

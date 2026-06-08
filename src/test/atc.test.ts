@@ -1,3 +1,4 @@
+import { expect, test } from "vitest"
 import { ADTClient, isErrorMessageType } from ".."
 import { runTest } from "./login"
 import { fullParse, isArray, isString, toInt, xmlArray, xmlNode, xmlNodeAttr } from "../utilities"
