@@ -1,8 +1,7 @@
-import * as t from "io-ts"
-import { validateParseResult } from ".."
+import { validateShape } from ".."
 import { AdtHTTP } from "../AdtHTTP"
-import { fullParse, xmlArray, xmlFlatArray, xmlNodeAttr } from "../utilities"
-import { parseUri, uriParts } from "./urlparser"
+import { fullParse, isObject, isString, xmlArray, xmlFlatArray, xmlNodeAttr } from "../utilities"
+import { parseUri, Range, UriParts } from "./urlparser"
 
 export interface UnitTestStackEntry {
   "adtcore:uri": string
@@ -52,13 +51,47 @@ export interface UnitTestClass {
   alerts: UnitTestAlert[]
 }
 
-const markerCodec = t.type({
-  kind: t.string,
-  keepsResult: t.boolean,
-  location: uriParts
-})
+export interface UnitTestOccurrenceMarker {
+  kind: string
+  keepsResult: boolean
+  location: UriParts
+}
 
-export type UnitTestOccurrenceMarker = t.TypeOf<typeof markerCodec>
+const isRangePoint = (x: unknown): x is { line: number; column: number } =>
+  isObject(x) &&
+  typeof (x as any).line === "number" &&
+  typeof (x as any).column === "number"
+
+const isRange = (x: unknown): x is Range =>
+  isObject(x) && isRangePoint((x as any).start) && isRangePoint((x as any).end)
+
+const isStringRecordOrUndef = (
+  x: unknown
+): x is Record<string, string> | undefined => {
+  if (x === undefined) return true
+  if (!isObject(x)) return false
+  return Object.values(x as Record<string, unknown>).every(isString)
+}
+
+export const isUriParts = (x: unknown): x is UriParts =>
+  isObject(x) &&
+  isString((x as any).uri) &&
+  isStringRecordOrUndef((x as any).query) &&
+  isRange((x as any).range) &&
+  isStringRecordOrUndef((x as any).hashparms)
+
+export const isUnitTestOccurrenceMarker = (
+  x: unknown
+): x is UnitTestOccurrenceMarker =>
+  isObject(x) &&
+  isString((x as any).kind) &&
+  typeof (x as any).keepsResult === "boolean" &&
+  isUriParts((x as any).location)
+
+const isUnitTestOccurrenceMarkerArray = (
+  x: unknown
+): x is UnitTestOccurrenceMarker[] =>
+  Array.isArray(x) && x.every(isUnitTestOccurrenceMarker)
 
 const parseDetail = (alert: any) =>
   xmlArray(alert, "details", "detail").reduce((result: string[], d: any) => {
@@ -220,5 +253,5 @@ export async function unitTestOccurrenceMarkers(
     return { kind, keepsResult, location: parseUri(uri) }
   })
 
-  return validateParseResult(t.array(markerCodec).decode(markers))
+  return validateShape(markers, isUnitTestOccurrenceMarkerArray, "UnitTestOccurrenceMarker[]")
 }

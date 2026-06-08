@@ -14,9 +14,6 @@ import {
   isString,
   xmlArray
 } from "./utilities"
-import { isLeft } from "fp-ts/lib/These"
-import * as t from "io-ts"
-import reporter from "io-ts-reporters"
 const ADTEXTYPEID = Symbol.for("ADT EXCEPTION")
 const CSRFEXTYPEID = Symbol.for("BAD CSRF")
 const HTTPEXTYPEID = Symbol.for("HTTP EXCEPTION")
@@ -271,12 +268,20 @@ export function ValidateStateful(h: AdtHTTP) {
     "This operation can only be performed in stateful mode"
   )
 }
-export const validateParseResult = <T>(parseResult: t.Validation<T>): T => {
-  if (isLeft(parseResult)) {
-    const messages = reporter.report(parseResult)
-    throw adtException(messages.slice(0, 3).join("\n"))
-  }
-  return parseResult.right
+/**
+ * Runtime shape gate. Mirrors the throw-on-mismatch semantics of the
+ * previous io-ts based `validateParseResult`. If `guard` accepts `value`
+ * (i.e. confirms it satisfies `T`), `value` is returned typed as `T`.
+ * Otherwise an `AdtErrorException` is raised so callers can treat shape
+ * mismatches as ordinary ADT errors.
+ */
+export function validateShape<T>(
+  value: unknown,
+  guard: (x: unknown) => x is T,
+  name: string
+): T {
+  if (guard(value)) return value
+  throw adtException(`Unexpected response shape: expected ${name}`)
 }
 
 export const isErrorMessageType = (x: string | SAPRC | undefined) =>

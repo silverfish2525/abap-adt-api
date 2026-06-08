@@ -3,104 +3,92 @@ import {
   Clean,
   encodeEntity,
   fullParse,
+  isArray,
+  isObject,
   isString,
-  mixed,
   numberParseOptions,
-  orUndefined,
   toInt,
   xmlArray,
   xmlNode,
   xmlNodeAttr
 } from "../utilities"
-import * as t from "io-ts"
-import { adtException, isErrorMessageType, validateParseResult } from ".."
-import { parseUri, uriParts } from "./urlparser"
-const exemptionKind = t.union([
-  t.literal("A"),
-  t.literal("I"),
-  t.literal(""),
-  t.string
-]) // SATC_AC_RSLT_XMPT_KIND Atc based/Inline/none
-const proposalFinding = mixed(
-  {
-    uri: t.string,
-    type: t.string,
-    name: t.string,
-    location: t.string,
-    processor: t.string,
-    lastChangedBy: t.string,
-    priority: t.number,
-    checkId: t.string,
-    checkTitle: t.string,
-    messageId: t.string,
-    messageTitle: t.string,
-    exemptionApproval: t.string,
-    exemptionKind, // SATC_AC_RSLT_XMPT_KIND Atc based/Inline/none
-    checksum: t.number,
-    quickfixInfo: t.string
-  },
-  {
-    quickfixes: t.partial({
-      automatic: t.boolean,
-      manual: t.boolean,
-      pseudo: t.boolean
-    })
+import { adtException, isErrorMessageType, validateShape } from ".."
+import { parseUri, UriParts } from "./urlparser"
+import { isUriParts } from "./unittest"
+
+// SATC_AC_RSLT_XMPT_KIND Atc based/Inline/none. The original io-ts decoder
+// listed "A" | "I" | "" but with `t.string` as a fallback union, so any
+// string was accepted. We keep that permissive surface.
+export type ExemptionKind = string
+
+export interface ProposalFinding {
+  uri: string
+  type: string
+  name: string
+  location: string
+  processor: string
+  lastChangedBy: string
+  priority: number
+  checkId: string
+  checkTitle: string
+  messageId: string
+  messageTitle: string
+  exemptionApproval: string
+  exemptionKind: ExemptionKind
+  checksum: number
+  quickfixInfo: string
+  quickfixes?: {
+    automatic?: boolean
+    manual?: boolean
+    pseudo?: boolean
   }
-)
+}
 
-const restriction = t.type({
-  enabled: t.boolean,
-  singlefinding: t.boolean,
-  rangeOfFindings: t.type({
-    enabled: t.boolean,
-    restrictByObject: t.type({
-      object: t.boolean,
-      package: t.boolean,
-      subobject: t.boolean,
-      target: t.union([
-        t.literal("subobject"),
-        t.literal("object"),
-        t.literal("package"),
-        t.literal("")
-      ])
-    }),
-    restrictByCheck: t.type({
-      check: t.boolean,
-      message: t.boolean,
-      target: t.union([t.literal("message"), t.literal("check"), t.literal("")])
-    })
-  })
-})
+export interface RestrictByObjectInner {
+  object: boolean
+  package: boolean
+  subobject: boolean
+  target: "subobject" | "object" | "package" | ""
+}
 
-const atcProposal = mixed(
-  {
-    finding: t.union([proposalFinding, t.string]),
-    package: t.string,
-    subObject: t.string,
-    subObjectType: t.string,
-    subObjectTypeDescr: t.string,
-    objectTypeDescr: t.string,
-    approver: t.string,
-    reason: t.union([t.literal("FPOS"), t.literal("OTHR"), t.literal("")]),
-    justification: t.string,
-    notify: t.union([
-      t.literal("never"),
-      t.literal("on_rejection"),
-      t.literal("always")
-    ]),
-    restriction: restriction
-  },
-  {
-    apprIsArea: t.string,
-    checkClass: t.string,
-    validUntil: t.string
+export interface RestrictByCheckInner {
+  check: boolean
+  message: boolean
+  target: "message" | "check" | ""
+}
+
+export interface AtcRestriction {
+  enabled: boolean
+  singlefinding: boolean
+  rangeOfFindings: {
+    enabled: boolean
+    restrictByObject: RestrictByObjectInner
+    restrictByCheck: RestrictByCheckInner
   }
-)
+}
 
-const atcProposalMessage = t.type({
-  type: t.string,
-  message: t.string
-})
+export interface AtcProposal {
+  finding: ProposalFinding | string
+  package: string
+  subObject: string
+  subObjectType: string
+  subObjectTypeDescr: string
+  objectTypeDescr: string
+  approver: string
+  reason: "FPOS" | "OTHR" | ""
+  justification: string
+  notify: "never" | "on_rejection" | "always"
+  restriction: AtcRestriction
+  apprIsArea?: string
+  checkClass?: string
+  validUntil?: string
+}
+
+export interface AtcProposalMessage {
+  type: string
+  message: string
+}
+
 export interface RestrictByObject {
   object: boolean
   package: boolean
@@ -108,89 +96,315 @@ export interface RestrictByObject {
   text: string
 }
 
-const atcRunResultInfo = t.type({
-  type: t.string,
-  description: t.string
-})
+export interface AtcRunResultInfo {
+  type: string
+  description: string
+}
 
-const atcRunResult = t.type({
-  id: t.string,
-  timestamp: t.number,
-  infos: t.array(atcRunResultInfo)
-})
+export interface AtcRunResult {
+  id: string
+  timestamp: number
+  infos: AtcRunResultInfo[]
+}
 
-const atcExcemption = t.type({
-  id: t.string,
-  justificationMandatory: t.boolean,
-  title: t.string
-})
+export interface AtcExemption {
+  id: string
+  justificationMandatory: boolean
+  title: string
+}
 
-const atcProperty = t.type({
-  name: t.string,
-  value: t.union([t.boolean, t.string])
-})
+export interface AtcProperty {
+  name: string
+  value: boolean | string
+}
 
-const atcCustomizingi = t.type({
-  properties: t.array(atcProperty),
-  excemptions: t.array(atcExcemption)
-})
+export interface AtcCustomizing {
+  properties: AtcProperty[]
+  excemptions: AtcExemption[]
+}
 
-const objectSet = t.type({
-  name: t.string,
-  title: t.string,
-  kind: t.string
-})
+export interface AtcObjectSet {
+  name: string
+  title: string
+  kind: string
+}
 
-const link = t.type({
-  href: t.string,
-  rel: t.string,
-  type: t.string
-})
+export interface AtcLink {
+  href: string
+  rel: string
+  type: string
+}
 
-const finding = t.type({
-  uri: t.string,
-  location: uriParts,
-  priority: t.number,
-  checkId: t.string,
-  checkTitle: t.string,
-  messageId: t.string,
-  messageTitle: t.string,
-  exemptionApproval: t.string,
-  exemptionKind,
-  quickfixInfo: orUndefined(t.string),
-  link: link
-})
-const object = t.type({
-  uri: t.string,
-  type: t.string,
-  name: t.string,
-  packageName: t.string,
-  author: t.string,
-  objectTypeId: orUndefined(t.string),
-  findings: t.array(finding)
-})
-const atcWorklist = t.type({
-  id: t.string,
-  timestamp: t.number,
-  usedObjectSet: t.string,
-  objectSetIsComplete: t.boolean,
-  objectSets: t.array(objectSet),
-  objects: t.array(object)
-})
+export interface AtcFinding {
+  uri: string
+  location: UriParts
+  priority: number
+  checkId: string
+  checkTitle: string
+  messageId: string
+  messageTitle: string
+  exemptionApproval: string
+  exemptionKind: ExemptionKind
+  quickfixInfo: string | undefined
+  link: AtcLink
+}
 
-const atcUser = t.type({
-  id: t.string,
-  title: t.string
-})
+export interface AtcObject {
+  uri: string
+  type: string
+  name: string
+  packageName: string
+  author: string
+  objectTypeId: string | undefined
+  findings: AtcFinding[]
+}
 
-export type AtcRunResult = Clean<t.TypeOf<typeof atcRunResult>>
-export type AtcCustomizing = Clean<t.TypeOf<typeof atcCustomizingi>>
-export type AtcWorkList = Clean<t.TypeOf<typeof atcWorklist>>
-export type AtcUser = Clean<t.TypeOf<typeof atcUser>>
-export type AtcProposal = Clean<t.TypeOf<typeof atcProposal>>
-export type AtcProposalMessage = Clean<t.TypeOf<typeof atcProposalMessage>>
+export interface AtcWorkList {
+  id: string
+  timestamp: number
+  usedObjectSet: string
+  objectSetIsComplete: boolean
+  objectSets: AtcObjectSet[]
+  objects: AtcObject[]
+}
 
-export const isProposalMessage = atcProposalMessage.is
+export interface AtcUser {
+  id: string
+  title: string
+}
+
+// `Clean<T>` aliases preserved for binary public-API symmetry with the
+// previous `t.TypeOf<typeof X>`-derived shapes.
+export type AtcRunResultClean = Clean<AtcRunResult>
+export type AtcCustomizingClean = Clean<AtcCustomizing>
+export type AtcWorkListClean = Clean<AtcWorkList>
+export type AtcUserClean = Clean<AtcUser>
+export type AtcProposalClean = Clean<AtcProposal>
+export type AtcProposalMessageClean = Clean<AtcProposalMessage>
+
+// Type guards ------------------------------------------------------------
+
+const isStr = (x: unknown): x is string => typeof x === "string"
+const isNum = (x: unknown): x is number => typeof x === "number"
+const isBool = (x: unknown): x is boolean => typeof x === "boolean"
+
+const isExemptionKind = (x: unknown): x is ExemptionKind => isStr(x)
+
+const isProposalFindingQuickfixes = (
+  x: unknown
+): x is ProposalFinding["quickfixes"] => {
+  if (x === undefined) return true
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if ("automatic" in o && !isBool(o.automatic)) return false
+  if ("manual" in o && !isBool(o.manual)) return false
+  if ("pseudo" in o && !isBool(o.pseudo)) return false
+  return true
+}
+
+const isProposalFinding = (x: unknown): x is ProposalFinding => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.uri) &&
+    isStr(o.type) &&
+    isStr(o.name) &&
+    isStr(o.location) &&
+    isStr(o.processor) &&
+    isStr(o.lastChangedBy) &&
+    isNum(o.priority) &&
+    isStr(o.checkId) &&
+    isStr(o.checkTitle) &&
+    isStr(o.messageId) &&
+    isStr(o.messageTitle) &&
+    isStr(o.exemptionApproval) &&
+    isExemptionKind(o.exemptionKind) &&
+    isNum(o.checksum) &&
+    isStr(o.quickfixInfo) &&
+    isProposalFindingQuickfixes(o.quickfixes)
+  )
+}
+
+const isRestrictByObjectInner = (x: unknown): x is RestrictByObjectInner => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (!isBool(o.object) || !isBool(o.package) || !isBool(o.subobject))
+    return false
+  return (
+    o.target === "subobject" ||
+    o.target === "object" ||
+    o.target === "package" ||
+    o.target === ""
+  )
+}
+
+const isRestrictByCheckInner = (x: unknown): x is RestrictByCheckInner => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (!isBool(o.check) || !isBool(o.message)) return false
+  return o.target === "message" || o.target === "check" || o.target === ""
+}
+
+const isAtcRestriction = (x: unknown): x is AtcRestriction => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (!isBool(o.enabled) || !isBool(o.singlefinding)) return false
+  const r = o.rangeOfFindings as Record<string, unknown> | undefined
+  if (!isObject(r)) return false
+  return (
+    isBool(r.enabled) &&
+    isRestrictByObjectInner(r.restrictByObject) &&
+    isRestrictByCheckInner(r.restrictByCheck)
+  )
+}
+
+export const isAtcProposal = (x: unknown): x is AtcProposal => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (!(isProposalFinding(o.finding) || isStr(o.finding))) return false
+  if (
+    !isStr(o.package) ||
+    !isStr(o.subObject) ||
+    !isStr(o.subObjectType) ||
+    !isStr(o.subObjectTypeDescr) ||
+    !isStr(o.objectTypeDescr) ||
+    !isStr(o.approver) ||
+    !isStr(o.justification)
+  )
+    return false
+  if (o.reason !== "FPOS" && o.reason !== "OTHR" && o.reason !== "") return false
+  if (
+    o.notify !== "never" &&
+    o.notify !== "on_rejection" &&
+    o.notify !== "always"
+  )
+    return false
+  if (!isAtcRestriction(o.restriction)) return false
+  if (o.apprIsArea !== undefined && !isStr(o.apprIsArea)) return false
+  if (o.checkClass !== undefined && !isStr(o.checkClass)) return false
+  if (o.validUntil !== undefined && !isStr(o.validUntil)) return false
+  return true
+}
+
+export const isAtcProposalMessage = (x: unknown): x is AtcProposalMessage => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.type) && isStr(o.message)
+}
+
+// Backwards-compat alias for the old `atcProposalMessage.is` helper.
+export const isProposalMessage = isAtcProposalMessage
+
+const isAtcRunResultInfo = (x: unknown): x is AtcRunResultInfo => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.type) && isStr(o.description)
+}
+
+const isAtcRunResult = (x: unknown): x is AtcRunResult => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.id) &&
+    isNum(o.timestamp) &&
+    isArray(o.infos) &&
+    (o.infos as unknown[]).every(isAtcRunResultInfo)
+  )
+}
+
+const isAtcExemption = (x: unknown): x is AtcExemption => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.id) && isBool(o.justificationMandatory) && isStr(o.title)
+}
+
+const isAtcProperty = (x: unknown): x is AtcProperty => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.name) && (isBool(o.value) || isStr(o.value))
+}
+
+const isAtcCustomizing = (x: unknown): x is AtcCustomizing => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isArray(o.properties) &&
+    (o.properties as unknown[]).every(isAtcProperty) &&
+    isArray(o.excemptions) &&
+    (o.excemptions as unknown[]).every(isAtcExemption)
+  )
+}
+
+const isAtcObjectSet = (x: unknown): x is AtcObjectSet => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.name) && isStr(o.title) && isStr(o.kind)
+}
+
+const isAtcLink = (x: unknown): x is AtcLink => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.href) && isStr(o.rel) && isStr(o.type)
+}
+
+const isAtcFinding = (x: unknown): x is AtcFinding => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.uri) &&
+    isUriParts(o.location) &&
+    isNum(o.priority) &&
+    isStr(o.checkId) &&
+    isStr(o.checkTitle) &&
+    isStr(o.messageId) &&
+    isStr(o.messageTitle) &&
+    isStr(o.exemptionApproval) &&
+    isExemptionKind(o.exemptionKind) &&
+    (o.quickfixInfo === undefined || isStr(o.quickfixInfo)) &&
+    isAtcLink(o.link)
+  )
+}
+
+const isAtcObject = (x: unknown): x is AtcObject => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.uri) &&
+    isStr(o.type) &&
+    isStr(o.name) &&
+    isStr(o.packageName) &&
+    isStr(o.author) &&
+    (o.objectTypeId === undefined || isStr(o.objectTypeId)) &&
+    isArray(o.findings) &&
+    (o.findings as unknown[]).every(isAtcFinding)
+  )
+}
+
+const isAtcWorkList = (x: unknown): x is AtcWorkList => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.id) &&
+    isNum(o.timestamp) &&
+    isStr(o.usedObjectSet) &&
+    isBool(o.objectSetIsComplete) &&
+    isArray(o.objectSets) &&
+    (o.objectSets as unknown[]).every(isAtcObjectSet) &&
+    isArray(o.objects) &&
+    (o.objects as unknown[]).every(isAtcObject)
+  )
+}
+
+const isAtcUser = (x: unknown): x is AtcUser => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return isStr(o.id) && isStr(o.title)
+}
+
+const isAtcUserArray = (x: unknown): x is AtcUser[] =>
+  isArray(x) && x.every(isAtcUser)
+
+// Functions --------------------------------------------------------------
 
 export async function atcCustomizing(h: AdtHTTP): Promise<AtcCustomizing> {
   const headers = {
@@ -212,7 +426,7 @@ export async function atcCustomizing(h: AdtHTTP): Promise<AtcCustomizing> {
     "reason"
   ).map(xmlNodeAttr)
   const retval = { properties, excemptions }
-  return validateParseResult(atcCustomizingi.decode(retval))
+  return validateShape(retval, isAtcCustomizing, "AtcCustomizing")
 }
 
 export async function atcCheckVariant(
@@ -259,7 +473,7 @@ export async function createAtcRun(
   const ts = xmlNode(raw, "worklistRun", "worklistTimestamp")
   const infos = xmlArray(raw, "worklistRun", "infos", "info")
   const retval = { id, timestamp: new Date(ts).getTime() / 1000, infos }
-  return validateParseResult(atcRunResult.decode(retval))
+  return validateShape(retval, isAtcRunResult, "AtcRunResult")
 }
 
 export async function atcWorklists(
@@ -306,7 +520,7 @@ export async function atcWorklists(
   })
   const ts = new Date(attrs.timestamp).getTime() / 1000
   const result = { ...attrs, timestamp: ts, objectSets, objects }
-  return validateParseResult(atcWorklist.decode(result))
+  return validateShape(result, isAtcWorkList, "AtcWorkList")
 }
 
 export async function atcUsers(h: AdtHTTP): Promise<AtcUser[]> {
@@ -318,7 +532,7 @@ export async function atcUsers(h: AdtHTTP): Promise<AtcUser[]> {
     parseAttributeValue: false
   })
   const users = xmlArray(raw, "feed", "entry")
-  return validateParseResult(t.array(atcUser).decode(users))
+  return validateShape(users, isAtcUserArray, "AtcUser[]")
 }
 
 export async function atcExemptProposal(
@@ -342,7 +556,7 @@ export async function atcExemptProposal(
   const { message, type } = xmlNode(raw, "exemptionApply", "status") || {}
   if (isErrorMessageType(type)) throw adtException(message)
   if (message && type)
-    return validateParseResult(atcProposalMessage.decode({ message, type }))
+    return validateShape({ message, type }, isAtcProposalMessage, "AtcProposalMessage")
   const finding = isString(root.finding)
     ? root.finding
     : xmlNodeAttr(xmlNode(root, "finding"))
@@ -405,7 +619,7 @@ export async function atcExemptProposal(
       }
     }
   }
-  return validateParseResult(atcProposal.decode(result))
+  return validateShape(result, isAtcProposal, "AtcProposal")
 }
 
 export async function atcDocumentation(h: AdtHTTP, docUri: string) {
@@ -506,9 +720,9 @@ export async function atcRequestExemption(
     parseTagValue: false,
     parseAttributeValue: false
   })
-  const result = validateParseResult(atcProposalMessage.decode(raw?.status))
+  const result = validateShape(raw?.status, isAtcProposalMessage, "AtcProposalMessage")
   if (isErrorMessageType(result.type)) throw adtException(result.message)
-  return validateParseResult(atcProposalMessage.decode(result))
+  return validateShape(result, isAtcProposalMessage, "AtcProposalMessage")
 }
 
 export async function atcContactUri(
@@ -536,7 +750,7 @@ export async function atcContactUri(
     parseAttributeValue: false
   })
   const { uri } = xmlNodeAttr(xmlNode(raw, "items", "item"))
-  return validateParseResult(t.string.decode(uri))
+  return validateShape(uri, isStr, "string")
 }
 
 export async function atcChangeContact(

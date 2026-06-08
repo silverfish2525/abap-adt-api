@@ -1,297 +1,591 @@
-import * as t from "io-ts"
 import {
   extractXmlArray,
   fullParse,
+  isArray,
   isNumber,
-  mixed,
-  orUndefined,
+  isObject,
+  isString,
   toInt,
   typedNodeAttr,
-  xmlArrayType,
   xmlNode
 } from "../utilities"
-import { validateParseResult } from "../AdtException"
+import { validateShape } from "../AdtException"
 
-const contributorClass = t.type({ name: t.string })
-const link = t.type({
-  "@_href": t.string,
-  "@_rel": t.string,
-  "@_type": t.string,
-  "@_title": t.string
-})
+// ---------------------------------------------------------------------------
+// Type guard helpers
+// ---------------------------------------------------------------------------
 
-// A	Active
-// R	Read Only
-// E	Error
-// S	SizeLim
-// T	TimeLim
-// C	Close Error
+const isStr = (x: unknown): x is string => typeof x === "string"
+const isNum = (x: unknown): x is number => typeof x === "number"
+const isBool = (x: unknown): x is boolean => typeof x === "boolean"
 
-const state = t.type({ "@_value": t.string, "@_text": t.string })
-
-const extendedData = t.type({
-  host: t.string,
-  size: t.number,
-  runtime: t.number,
-  runtimeABAP: t.number,
-  runtimeSystem: t.number,
-  runtimeDatabase: t.number,
-  expiration: t.string,
-  system: t.string,
-  client: t.number,
-  isAggregated: t.boolean,
-  aggregationKind: orUndefined(t.string),
-  objectName: t.string,
-  state: state
-})
-
-const entryAuthor = t.type({ name: t.string, uri: t.string })
-const entry = t.type({
-  author: entryAuthor,
-  content: t.type({
-    "@_type": t.string,
-    "@_src": t.string
-  }),
-  id: t.string,
-  link: xmlArrayType(link),
-  published: t.string,
-  title: t.string,
-  updated: t.string,
-  extendedData: extendedData,
-  "@_lang": t.string
-})
-
-const feed = t.type({
-  author: contributorClass,
-  contributor: contributorClass,
-  title: t.string,
-  updated: t.string,
-  entry: xmlArrayType(entry)
-})
-const traceResults = t.type({ feed: feed })
-
-const time = t.type({
-  "@_time": t.number,
-  "@_percentage": t.number
-})
-
-const baseLink = t.type({
-  "@_rel": t.string,
-  "@_href": t.string
-})
-
-const calledProgram = t.type({ "@_context": t.string })
-
-const callingProgram = mixed(
-  {
-    "@_context": t.string,
-    "@_byteCodeOffset": t.number
-  },
-  {
-    "@_uri": t.string,
-    "@_type": t.string,
-    "@_name": t.string,
-    "@_packageName": t.string,
-    "@_objectReferenceQuery": t.string
+// Mirrors the original `xmlArrayType<C>` codec: accepts a single value, an
+// array of values, or undefined. fast-xml-parser collapses single-element
+// arrays to scalars unless told otherwise, so the API has to handle both.
+const xmlArrayLike = <T>(g: (x: unknown) => x is T) =>
+  (x: unknown): x is T | T[] | undefined => {
+    if (x === undefined) return true
+    if (isArray(x)) return (x as unknown[]).every(g)
+    return g(x)
   }
-)
 
-const hlentry = mixed(
-  {
-    calledProgram: calledProgram,
-    grossTime: time,
-    traceEventNetTime: time,
-    proceduralNetTime: time,
-    "@_topDownIndex": t.number,
-    "@_index": t.number,
-    "@_hitCount": t.number,
-    "@_recursionDepth": t.number,
-    "@_description": t.string
-  },
-  {
-    callingProgram: callingProgram,
-    "@_stackCount": t.number,
-    "@_proceduralEntryAnchor": t.number,
-    "@_dbAccessAnchor": t.number
-  }
-)
+// ---------------------------------------------------------------------------
+// Trace results (parseTraceResults)
+// ---------------------------------------------------------------------------
 
-const Hitlist = t.type({
-  link: baseLink,
-  entry: xmlArrayType(hlentry)
-})
+interface ContributorClass { name: string }
+interface XmlLink {
+  "@_href": string
+  "@_rel": string
+  "@_type": string
+  "@_title": string
+}
+interface XmlState { "@_value": string; "@_text": string }
+interface ExtendedDataRaw {
+  host: string
+  size: number
+  runtime: number
+  runtimeABAP: number
+  runtimeSystem: number
+  runtimeDatabase: number
+  expiration: string
+  system: string
+  client: number
+  isAggregated: boolean
+  aggregationKind?: string
+  objectName: string
+  state: XmlState
+}
+interface EntryAuthor { name: string; uri: string }
+interface FeedEntryRaw {
+  author: EntryAuthor
+  content: { "@_type": string; "@_src": string }
+  id: string
+  link: XmlLink | XmlLink[] | undefined
+  published: string
+  title: string
+  updated: string
+  extendedData: ExtendedDataRaw
+  "@_lang": string
+}
+interface FeedRaw {
+  author: ContributorClass
+  contributor: ContributorClass
+  title: string
+  updated: string
+  entry: FeedEntryRaw | FeedEntryRaw[] | undefined
+}
+interface TraceResultsRaw { feed: FeedRaw }
 
-const HitListResponse = t.type({ hitlist: Hitlist })
-///
+const isContributorClass = (x: unknown): x is ContributorClass =>
+  isObject(x) && isStr((x as any).name)
 
-const accessTime = t.type({
-  "@_total": t.number,
-  "@_applicationServer": t.number,
-  "@_database": t.number,
-  "@_ratioOfTraceTotal": t.number
-})
+const isXmlLink = (x: unknown): x is XmlLink =>
+  isObject(x) &&
+  isStr((x as any)["@_href"]) &&
+  isStr((x as any)["@_rel"]) &&
+  isStr((x as any)["@_type"]) &&
+  isStr((x as any)["@_title"])
 
-const dBAccess = mixed(
-  {
-    accessTime: accessTime,
-    "@_index": t.number,
-    "@_tableName": t.string,
-    "@_statement": t.string,
-    "@_type": t.union([
-      t.literal("EXEC SQL"),
-      t.literal("OpenSQL"),
-      t.literal("")
-    ]),
-    "@_totalCount": t.number,
-    "@_bufferedCount": t.number
-  },
-  {
-    callingProgram: callingProgram
-  }
-)
+const isXmlState = (x: unknown): x is XmlState =>
+  isObject(x) && isStr((x as any)["@_value"]) && isStr((x as any)["@_text"])
 
-const dBAccesses = t.type({
-  link: baseLink,
-  dbAccess: xmlArrayType(dBAccess),
-  tables: t.union([
-    t.type({
-      table: xmlArrayType(
-        t.type({
-          "@_name": t.string,
-          "@_type": t.string,
-          "@_description": t.string,
-          "@_bufferMode": t.string,
-          "@_storageType": t.string,
-          "@_package": t.string
-        })
-      )
-    }),
-    t.literal("")
-  ]),
-  "@_totalDbTime": t.number
-})
-
-const traceDBAccesResponse = t.type({ dbAccesses: dBAccesses })
-///
-const statement = mixed(
-  {
-    callingProgram: callingProgram,
-    grossTime: time,
-    traceEventNetTime: time,
-    proceduralNetTime: time,
-    "@_index": t.number,
-    "@_id": t.number,
-    "@_description": t.string,
-    "@_hitCount": t.number,
-    "@_hasDetailSubnodes": t.boolean,
-    "@_hasProcedureLikeSubnodes": t.boolean,
-    "@_callerId": t.number,
-    "@_callLevel": t.number,
-    "@_subnodeCount": t.number,
-    "@_directSubnodeCount": t.number,
-    "@_directSubnodeCountProcedureLike": t.number,
-    "@_hitlistAnchor": t.number
-  },
-  {
-    "@_isProcedureLike": t.boolean,
-    "@_isProceduralUnit": t.boolean,
-    "@_isAutoDrillDowned": t.boolean,
-    "@_calltreeAnchor": t.number,
-    "@_moduleHitlistAnchor": t.number
-  }
-)
-
-const traceStatementResponse = t.type({
-  statements: t.type({
-    link: baseLink,
-    statement: xmlArrayType(statement),
-    "@_withDetails": t.boolean,
-    "@_withSysEvents": t.boolean,
-    "@_count": t.union([t.number, t.string])
-  })
-})
-
-///
-
-const author = t.type({
-  name: t.string,
-  uri: t.string,
-  "@_role": t.string
-})
-
-const client = t.partial({
-  "#text": orUndefined(t.number),
-  "@_role": t.string
-})
-
-const executions = t.type({
-  "@_maximal": t.number,
-  "@_completed": t.number
-})
-
-const rawProcessTypes = t.union([
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/any"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/http"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/dialog"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/batch"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/rfc"),
-  t.literal(
-    "/sap/bc/adt/runtime/traces/abaptraces/processtypes/sharedobjectsarea"
+const isExtendedDataRaw = (x: unknown): x is ExtendedDataRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.host) &&
+    isNum(o.size) &&
+    isNum(o.runtime) &&
+    isNum(o.runtimeABAP) &&
+    isNum(o.runtimeSystem) &&
+    isNum(o.runtimeDatabase) &&
+    isStr(o.expiration) &&
+    isStr(o.system) &&
+    isNum(o.client) &&
+    isBool(o.isAggregated) &&
+    (o.aggregationKind === undefined || isStr(o.aggregationKind)) &&
+    isStr(o.objectName) &&
+    isXmlState(o.state)
   )
-])
+}
 
-const rawObjectTypes = t.union([
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/any"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/url"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/transaction"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/report"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/functionmodule"),
-  t.literal(
-    "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/sharedobjectarea"
+const isEntryAuthor = (x: unknown): x is EntryAuthor =>
+  isObject(x) && isStr((x as any).name) && isStr((x as any).uri)
+
+const isFeedEntryRaw = (x: unknown): x is FeedEntryRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  const c = o.content as Record<string, unknown> | undefined
+  return (
+    isEntryAuthor(o.author) &&
+    isObject(c) &&
+    isStr(c["@_type"]) &&
+    isStr(c["@_src"]) &&
+    isStr(o.id) &&
+    xmlArrayLike(isXmlLink)(o.link) &&
+    isStr(o.published) &&
+    isStr(o.title) &&
+    isStr(o.updated) &&
+    isExtendedDataRaw(o.extendedData) &&
+    isStr(o["@_lang"])
   )
-])
-type RawObjectTypes = t.TypeOf<typeof rawObjectTypes>
-type RawProcessTypes = t.TypeOf<typeof rawProcessTypes>
-const traceListextendedData = t.type({
-  host: t.string,
-  requestIndex: t.number,
-  client: xmlArrayType(client),
-  description: t.string,
-  isAggregated: t.boolean,
-  expires: t.string,
-  processType: t.type({ "@_processTypeId": rawProcessTypes }),
-  object: t.type({ "@_objectTypeId": rawObjectTypes }),
-  executions: executions
-})
+}
 
-const traceListEntry = mixed(
-  {
-    id: t.string,
-    author: xmlArrayType(author),
-    content: t.type({
-      "@_type": t.string,
-      "@_src": t.string
-    }),
-    published: t.string,
-    title: t.string,
-    updated: t.string,
-    extendedData: traceListextendedData,
-    "@_lang": t.string
-  },
-  {
-    link: xmlArrayType(link)
-  }
-)
-const tlFeed = t.type({
-  contributor: t.type({
-    name: t.string,
-    "@_role": t.string
-  }),
-  title: t.string,
-  updated: t.string,
-  entry: xmlArrayType(traceListEntry)
-})
-const tracesListRequest = t.type({ feed: tlFeed })
+const isFeedRaw = (x: unknown): x is FeedRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isContributorClass(o.author) &&
+    isContributorClass(o.contributor) &&
+    isStr(o.title) &&
+    isStr(o.updated) &&
+    xmlArrayLike(isFeedEntryRaw)(o.entry)
+  )
+}
+
+const isTraceResultsRaw = (x: unknown): x is TraceResultsRaw =>
+  isObject(x) && isFeedRaw((x as any).feed)
+
+// ---------------------------------------------------------------------------
+// HitListResponse
+// ---------------------------------------------------------------------------
+
+interface BaseLink { "@_rel": string; "@_href": string }
+interface XmlTime { "@_time": number; "@_percentage": number }
+interface CalledProgramRaw { "@_context": string }
+interface CallingProgramRaw {
+  "@_context": string
+  "@_byteCodeOffset": number
+  "@_uri"?: string
+  "@_type"?: string
+  "@_name"?: string
+  "@_packageName"?: string
+  "@_objectReferenceQuery"?: string
+}
+interface HitListEntryRaw {
+  calledProgram: CalledProgramRaw
+  grossTime: XmlTime
+  traceEventNetTime: XmlTime
+  proceduralNetTime: XmlTime
+  "@_topDownIndex": number
+  "@_index": number
+  "@_hitCount": number
+  "@_recursionDepth": number
+  "@_description": string
+  callingProgram?: CallingProgramRaw
+  "@_stackCount"?: number
+  "@_proceduralEntryAnchor"?: number
+  "@_dbAccessAnchor"?: number
+}
+interface HitlistRaw {
+  link: BaseLink
+  entry: HitListEntryRaw | HitListEntryRaw[] | undefined
+}
+interface HitListResponseRaw { hitlist: HitlistRaw }
+
+const isBaseLink = (x: unknown): x is BaseLink =>
+  isObject(x) && isStr((x as any)["@_rel"]) && isStr((x as any)["@_href"])
+
+const isXmlTime = (x: unknown): x is XmlTime =>
+  isObject(x) &&
+  isNum((x as any)["@_time"]) &&
+  isNum((x as any)["@_percentage"])
+
+const isCalledProgramRaw = (x: unknown): x is CalledProgramRaw =>
+  isObject(x) && isStr((x as any)["@_context"])
+
+const isCallingProgramRaw = (x: unknown): x is CallingProgramRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (!isStr(o["@_context"]) || !isNum(o["@_byteCodeOffset"])) return false
+  if (o["@_uri"] !== undefined && !isStr(o["@_uri"])) return false
+  if (o["@_type"] !== undefined && !isStr(o["@_type"])) return false
+  if (o["@_name"] !== undefined && !isStr(o["@_name"])) return false
+  if (o["@_packageName"] !== undefined && !isStr(o["@_packageName"]))
+    return false
+  if (
+    o["@_objectReferenceQuery"] !== undefined &&
+    !isStr(o["@_objectReferenceQuery"])
+  )
+    return false
+  return true
+}
+
+const isHitListEntryRaw = (x: unknown): x is HitListEntryRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (
+    !isCalledProgramRaw(o.calledProgram) ||
+    !isXmlTime(o.grossTime) ||
+    !isXmlTime(o.traceEventNetTime) ||
+    !isXmlTime(o.proceduralNetTime)
+  )
+    return false
+  if (
+    !isNum(o["@_topDownIndex"]) ||
+    !isNum(o["@_index"]) ||
+    !isNum(o["@_hitCount"]) ||
+    !isNum(o["@_recursionDepth"]) ||
+    !isStr(o["@_description"])
+  )
+    return false
+  if (o.callingProgram !== undefined && !isCallingProgramRaw(o.callingProgram))
+    return false
+  if (o["@_stackCount"] !== undefined && !isNum(o["@_stackCount"])) return false
+  if (
+    o["@_proceduralEntryAnchor"] !== undefined &&
+    !isNum(o["@_proceduralEntryAnchor"])
+  )
+    return false
+  if (o["@_dbAccessAnchor"] !== undefined && !isNum(o["@_dbAccessAnchor"]))
+    return false
+  return true
+}
+
+const isHitlistRaw = (x: unknown): x is HitlistRaw =>
+  isObject(x) &&
+  isBaseLink((x as any).link) &&
+  xmlArrayLike(isHitListEntryRaw)((x as any).entry)
+
+const isHitListResponseRaw = (x: unknown): x is HitListResponseRaw =>
+  isObject(x) && isHitlistRaw((x as any).hitlist)
+
+// ---------------------------------------------------------------------------
+// traceDBAccesResponse
+// ---------------------------------------------------------------------------
+
+interface AccessTimeRaw {
+  "@_total": number
+  "@_applicationServer": number
+  "@_database": number
+  "@_ratioOfTraceTotal": number
+}
+interface DbAccessRaw {
+  accessTime: AccessTimeRaw
+  "@_index": number
+  "@_tableName": string
+  "@_statement": string
+  "@_type": "EXEC SQL" | "OpenSQL" | ""
+  "@_totalCount": number
+  "@_bufferedCount": number
+  callingProgram?: CallingProgramRaw
+}
+interface DbTableRaw {
+  "@_name": string
+  "@_type": string
+  "@_description": string
+  "@_bufferMode": string
+  "@_storageType": string
+  "@_package": string
+}
+interface DbAccessesRaw {
+  link: BaseLink
+  dbAccess: DbAccessRaw | DbAccessRaw[] | undefined
+  tables: { table: DbTableRaw | DbTableRaw[] | undefined } | ""
+  "@_totalDbTime": number
+}
+interface TraceDbAccessResponseRaw { dbAccesses: DbAccessesRaw }
+
+const isAccessTimeRaw = (x: unknown): x is AccessTimeRaw =>
+  isObject(x) &&
+  isNum((x as any)["@_total"]) &&
+  isNum((x as any)["@_applicationServer"]) &&
+  isNum((x as any)["@_database"]) &&
+  isNum((x as any)["@_ratioOfTraceTotal"])
+
+const isDbAccessTypeLiteral = (x: unknown): x is "EXEC SQL" | "OpenSQL" | "" =>
+  x === "EXEC SQL" || x === "OpenSQL" || x === ""
+
+const isDbAccessRaw = (x: unknown): x is DbAccessRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (
+    !isAccessTimeRaw(o.accessTime) ||
+    !isNum(o["@_index"]) ||
+    !isStr(o["@_tableName"]) ||
+    !isStr(o["@_statement"]) ||
+    !isDbAccessTypeLiteral(o["@_type"]) ||
+    !isNum(o["@_totalCount"]) ||
+    !isNum(o["@_bufferedCount"])
+  )
+    return false
+  if (o.callingProgram !== undefined && !isCallingProgramRaw(o.callingProgram))
+    return false
+  return true
+}
+
+const isDbTableRaw = (x: unknown): x is DbTableRaw =>
+  isObject(x) &&
+  isStr((x as any)["@_name"]) &&
+  isStr((x as any)["@_type"]) &&
+  isStr((x as any)["@_description"]) &&
+  isStr((x as any)["@_bufferMode"]) &&
+  isStr((x as any)["@_storageType"]) &&
+  isStr((x as any)["@_package"])
+
+const isDbAccessesRaw = (x: unknown): x is DbAccessesRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (!isBaseLink(o.link) || !isNum(o["@_totalDbTime"])) return false
+  if (!xmlArrayLike(isDbAccessRaw)(o.dbAccess)) return false
+  if (o.tables === "") return true
+  if (!isObject(o.tables)) return false
+  return xmlArrayLike(isDbTableRaw)((o.tables as any).table)
+}
+
+const isTraceDbAccessResponseRaw = (
+  x: unknown
+): x is TraceDbAccessResponseRaw =>
+  isObject(x) && isDbAccessesRaw((x as any).dbAccesses)
+
+// ---------------------------------------------------------------------------
+// traceStatementResponse
+// ---------------------------------------------------------------------------
+
+interface StatementRaw {
+  callingProgram: CallingProgramRaw
+  grossTime: XmlTime
+  traceEventNetTime: XmlTime
+  proceduralNetTime: XmlTime
+  "@_index": number
+  "@_id": number
+  "@_description": string
+  "@_hitCount": number
+  "@_hasDetailSubnodes": boolean
+  "@_hasProcedureLikeSubnodes": boolean
+  "@_callerId": number
+  "@_callLevel": number
+  "@_subnodeCount": number
+  "@_directSubnodeCount": number
+  "@_directSubnodeCountProcedureLike": number
+  "@_hitlistAnchor": number
+  "@_isProcedureLike"?: boolean
+  "@_isProceduralUnit"?: boolean
+  "@_isAutoDrillDowned"?: boolean
+  "@_calltreeAnchor"?: number
+  "@_moduleHitlistAnchor"?: number
+}
+
+interface StatementsRaw {
+  link: BaseLink
+  statement: StatementRaw | StatementRaw[] | undefined
+  "@_withDetails": boolean
+  "@_withSysEvents": boolean
+  "@_count": number | string
+}
+
+interface TraceStatementResponseRaw { statements: StatementsRaw }
+
+const isStatementRaw = (x: unknown): x is StatementRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (
+    !isCallingProgramRaw(o.callingProgram) ||
+    !isXmlTime(o.grossTime) ||
+    !isXmlTime(o.traceEventNetTime) ||
+    !isXmlTime(o.proceduralNetTime)
+  )
+    return false
+  if (
+    !isNum(o["@_index"]) ||
+    !isNum(o["@_id"]) ||
+    !isStr(o["@_description"]) ||
+    !isNum(o["@_hitCount"]) ||
+    !isBool(o["@_hasDetailSubnodes"]) ||
+    !isBool(o["@_hasProcedureLikeSubnodes"]) ||
+    !isNum(o["@_callerId"]) ||
+    !isNum(o["@_callLevel"]) ||
+    !isNum(o["@_subnodeCount"]) ||
+    !isNum(o["@_directSubnodeCount"]) ||
+    !isNum(o["@_directSubnodeCountProcedureLike"]) ||
+    !isNum(o["@_hitlistAnchor"])
+  )
+    return false
+  if (o["@_isProcedureLike"] !== undefined && !isBool(o["@_isProcedureLike"]))
+    return false
+  if (
+    o["@_isProceduralUnit"] !== undefined &&
+    !isBool(o["@_isProceduralUnit"])
+  )
+    return false
+  if (
+    o["@_isAutoDrillDowned"] !== undefined &&
+    !isBool(o["@_isAutoDrillDowned"])
+  )
+    return false
+  if (o["@_calltreeAnchor"] !== undefined && !isNum(o["@_calltreeAnchor"]))
+    return false
+  if (
+    o["@_moduleHitlistAnchor"] !== undefined &&
+    !isNum(o["@_moduleHitlistAnchor"])
+  )
+    return false
+  return true
+}
+
+const isStatementsRaw = (x: unknown): x is StatementsRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isBaseLink(o.link) &&
+    xmlArrayLike(isStatementRaw)(o.statement) &&
+    isBool(o["@_withDetails"]) &&
+    isBool(o["@_withSysEvents"]) &&
+    (isNum(o["@_count"]) || isStr(o["@_count"]))
+  )
+}
+
+const isTraceStatementResponseRaw = (
+  x: unknown
+): x is TraceStatementResponseRaw =>
+  isObject(x) && isStatementsRaw((x as any).statements)
+
+// ---------------------------------------------------------------------------
+// tracesListRequest
+// ---------------------------------------------------------------------------
+
+interface AuthorRaw { name: string; uri: string; "@_role": string }
+interface ClientRaw { "#text"?: number; "@_role"?: string }
+interface ExecutionsRaw { "@_maximal": number; "@_completed": number }
+
+const RAW_PROCESS_TYPES = [
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/any",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/http",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/dialog",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/batch",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/rfc",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/sharedobjectsarea"
+] as const
+type RawProcessTypes = (typeof RAW_PROCESS_TYPES)[number]
+
+const RAW_OBJECT_TYPES = [
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/any",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/url",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/transaction",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/report",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/functionmodule",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/sharedobjectarea"
+] as const
+type RawObjectTypes = (typeof RAW_OBJECT_TYPES)[number]
+
+const isRawProcessTypes = (x: unknown): x is RawProcessTypes =>
+  isStr(x) && (RAW_PROCESS_TYPES as readonly string[]).includes(x)
+
+const isRawObjectTypes = (x: unknown): x is RawObjectTypes =>
+  isStr(x) && (RAW_OBJECT_TYPES as readonly string[]).includes(x)
+
+interface TraceListExtendedDataRaw {
+  host: string
+  requestIndex: number
+  client: ClientRaw | ClientRaw[] | undefined
+  description: string
+  isAggregated: boolean
+  expires: string
+  processType: { "@_processTypeId": RawProcessTypes }
+  object: { "@_objectTypeId": RawObjectTypes }
+  executions: ExecutionsRaw
+}
+
+interface TraceListEntryRaw {
+  id: string
+  author: AuthorRaw | AuthorRaw[] | undefined
+  content: { "@_type": string; "@_src": string }
+  published: string
+  title: string
+  updated: string
+  extendedData: TraceListExtendedDataRaw
+  "@_lang": string
+  link?: XmlLink | XmlLink[] | undefined
+}
+
+interface TlFeedRaw {
+  contributor: { name: string; "@_role": string }
+  title: string
+  updated: string
+  entry: TraceListEntryRaw | TraceListEntryRaw[] | undefined
+}
+
+interface TracesListRequestRaw { feed: TlFeedRaw }
+
+const isAuthorRaw = (x: unknown): x is AuthorRaw =>
+  isObject(x) &&
+  isStr((x as any).name) &&
+  isStr((x as any).uri) &&
+  isStr((x as any)["@_role"])
+
+const isClientRaw = (x: unknown): x is ClientRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  if (o["#text"] !== undefined && !isNum(o["#text"])) return false
+  if (o["@_role"] !== undefined && !isStr(o["@_role"])) return false
+  return true
+}
+
+const isExecutionsRaw = (x: unknown): x is ExecutionsRaw =>
+  isObject(x) &&
+  isNum((x as any)["@_maximal"]) &&
+  isNum((x as any)["@_completed"])
+
+const isTraceListExtendedDataRaw = (
+  x: unknown
+): x is TraceListExtendedDataRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  return (
+    isStr(o.host) &&
+    isNum(o.requestIndex) &&
+    xmlArrayLike(isClientRaw)(o.client) &&
+    isStr(o.description) &&
+    isBool(o.isAggregated) &&
+    isStr(o.expires) &&
+    isObject(o.processType) &&
+    isRawProcessTypes((o.processType as any)["@_processTypeId"]) &&
+    isObject(o.object) &&
+    isRawObjectTypes((o.object as any)["@_objectTypeId"]) &&
+    isExecutionsRaw(o.executions)
+  )
+}
+
+const isTraceListEntryRaw = (x: unknown): x is TraceListEntryRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  const c = o.content as Record<string, unknown> | undefined
+  if (!isStr(o.id)) return false
+  if (!xmlArrayLike(isAuthorRaw)(o.author)) return false
+  if (!isObject(c) || !isStr(c["@_type"]) || !isStr(c["@_src"])) return false
+  if (
+    !isStr(o.published) ||
+    !isStr(o.title) ||
+    !isStr(o.updated) ||
+    !isStr(o["@_lang"])
+  )
+    return false
+  if (!isTraceListExtendedDataRaw(o.extendedData)) return false
+  if (o.link !== undefined && !xmlArrayLike(isXmlLink)(o.link)) return false
+  return true
+}
+
+const isTlFeedRaw = (x: unknown): x is TlFeedRaw => {
+  if (!isObject(x)) return false
+  const o = x as Record<string, unknown>
+  const contributor = o.contributor as Record<string, unknown> | undefined
+  return (
+    isObject(contributor) &&
+    isStr(contributor.name) &&
+    isStr(contributor["@_role"]) &&
+    isStr(o.title) &&
+    isStr(o.updated) &&
+    xmlArrayLike(isTraceListEntryRaw)(o.entry)
+  )
+}
+
+const isTracesListRequestRaw = (x: unknown): x is TracesListRequestRaw =>
+  isObject(x) && isTlFeedRaw((x as any).feed)
+
+// ---------------------------------------------------------------------------
+// Public types (unchanged from before)
+// ---------------------------------------------------------------------------
 
 export interface TraceResults {
   author: string
@@ -379,8 +673,6 @@ export interface TraceTime {
   percentage: number
 }
 
-///
-
 export interface TraceDBAccessResponse {
   parentLink: string
   dbaccesses: Dbaccess[]
@@ -415,8 +707,6 @@ export interface Table {
   package: string
 }
 
-///
-
 export interface TraceStatement {
   index: number
   id: number
@@ -448,14 +738,14 @@ export interface TraceStatementResponse {
   parentLink: string
   statements: TraceStatement[]
 }
-///
+
 export type TraceStatementOptions = Partial<{
   id: number
   withDetails: boolean
   autoDrillDownThreshold: number
   withSystemEvents: boolean
 }>
-///
+
 export interface TraceRequestAuthor {
   name: string
   role: string
@@ -503,7 +793,6 @@ export interface TraceRequestList {
   requests: TraceRequest[]
 }
 
-///
 export interface TraceParameters {
   allMiscAbapStatements: boolean
   allProceduralUnits: boolean
@@ -519,7 +808,6 @@ export interface TraceParameters {
   maxSizeForTraceFile: number
   maxTimeForTracing: number
 }
-///
 
 export type TracedProcessType =
   | "HTTP"
@@ -631,7 +919,7 @@ export interface TracesCreationConfig {
 }
 
 const parseRawTrace = (x: unknown) =>
-  validateParseResult(traceResults.decode(x)).feed
+  validateShape(x, isTraceResultsRaw, "TraceResults").feed
 
 export const parseTraceResults = (xml: string): TraceResults => {
   const raw = parseRawTrace(fullParse(xml, { removeNSPrefix: true }))
@@ -677,8 +965,10 @@ export const parseTraceResults = (xml: string): TraceResults => {
 }
 
 export const parseTraceHitList = (xml: string): TraceHitList => {
-  const raw = validateParseResult(
-    HitListResponse.decode(fullParse(xml, { removeNSPrefix: true }))
+  const raw = validateShape(
+    fullParse(xml, { removeNSPrefix: true }),
+    isHitListResponseRaw,
+    "HitListResponse"
   ).hitlist
   const parentLink = raw.link["@_href"]
   const entries = extractXmlArray(raw.entry).map(e => {
@@ -704,8 +994,11 @@ export const parseTraceHitList = (xml: string): TraceHitList => {
 
 export const parseTraceDbAccess = (xml: string): TraceDBAccessResponse => {
   const toParse = fullParse(xml, { removeNSPrefix: true })
-  const parsed = traceDBAccesResponse.decode(toParse)
-  const raw = validateParseResult(parsed).dbAccesses
+  const raw = validateShape(
+    toParse,
+    isTraceDbAccessResponseRaw,
+    "TraceDBAccessResponse"
+  ).dbAccesses
   const parentLink = raw.link["@_href"]
   const dbaccesses = extractXmlArray(raw.dbAccess).map(a => {
     const callingProgram = a.callingProgram && typedNodeAttr(a.callingProgram)
@@ -727,8 +1020,10 @@ const parseCount = (count: string | number) => {
 }
 
 export const parseTraceStatements = (xml: string) => {
-  const raw = validateParseResult(
-    traceStatementResponse.decode(fullParse(xml, { removeNSPrefix: true }))
+  const raw = validateShape(
+    fullParse(xml, { removeNSPrefix: true }),
+    isTraceStatementResponseRaw,
+    "TraceStatementResponse"
   ).statements
 
   const parentLink = raw.link["@_href"]
@@ -751,8 +1046,11 @@ export const parseTraceStatements = (xml: string) => {
 }
 
 export const parseTraceRequestList = (xml: string): TraceRequestList => {
-  const raw = tracesListRequest.decode(fullParse(xml, { removeNSPrefix: true }))
-  const parsed = validateParseResult(raw).feed
+  const parsed = validateShape(
+    fullParse(xml, { removeNSPrefix: true }),
+    isTracesListRequestRaw,
+    "TracesListRequest"
+  ).feed
   const {
     contributor: { name: contributorName, "@_role": contributorRole },
     title

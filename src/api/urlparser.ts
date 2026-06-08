@@ -1,26 +1,22 @@
-import { Clean, parts, toInt } from "../utilities"
+import { parts, toInt } from "../utilities"
 import { Location } from "./syntax"
-import * as t from "io-ts";
 
-const location = t.type({
-  line: t.number,
-  column: t.number
-})
+interface RangePoint {
+  line: number
+  column: number
+}
 
-const range = t.type({
-  start: location,
-  end: location
-})
+export interface Range {
+  start: RangePoint
+  end: RangePoint
+}
 
-export const uriParts = t.type({
-  uri: t.string,
-  query: t.union([t.undefined, t.record(t.string, t.string)]),
-  range: range,
-  hashparms: t.union([t.undefined, t.record(t.string, t.string)]),
-})
-
-export type Range = Clean<t.TypeOf<typeof range>>
-export type UriParts = Clean<t.TypeOf<typeof uriParts>>
+export interface UriParts {
+  uri: string
+  query: Record<string, string> | undefined
+  range: Range
+  hashparms: Record<string, string> | undefined
+}
 
 export const rangeToString = (range: Range) =>
   `#start=${range.start.line},${range.start.column};end=${range.end.line},${range.end.column}`
@@ -69,5 +65,3 @@ export function parseUri(sourceuri: string): UriParts {
 
   return { range, uri, query, hashparms }
 }
-
-

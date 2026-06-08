@@ -28,9 +28,7 @@
     "axios": "^1.15.2",
     "fast-xml-parser": "^5.7.2",
     "fp-ts": "^2.16.7",
-    "html-entities": "^2.5.2",
-    "io-ts": "^2.2.21",
-    "io-ts-reporters": "^2.0.1"
+    "html-entities": "^2.5.2"
   },
   "devDependencies": {
     "@types/jest": "^27.5.2",

@@ -1,5 +1,4 @@
 import { XMLParser, strnumOptions, X2jOptions } from "fast-xml-parser"
-import * as t from "io-ts"
 export { encode as encodeEntity } from "html-entities"
 import { encode } from "html-entities"
 
@@ -30,8 +29,6 @@ export function JSON2AbapXML(original: any, root: string = "DATA") {
   </asx:abap>`
 }
 
-export const xmlArrayType = <C extends t.Mixed>(x: C) =>
-  t.union([t.array(x), x, t.undefined])
 export const extractXmlArray = <T>(x: T | T[] | undefined): T[] =>
   x ? (isArray(x) ? x : [x]) : []
 
@@ -201,13 +198,3 @@ export const toXmlAttributes = (o: any, prefix: string) => {
 }
 
 export type Clean<T> = Pick<T, keyof T>
-
-export const orUndefined = <T extends t.Mixed>(x: T) =>
-  t.union([t.undefined, x])
-
-export function mixed<R extends t.Props, O extends t.Props>(
-  required: R,
-  optional: O
-): t.IntersectionC<[t.TypeC<R>, t.PartialC<O>]> {
-  return t.intersection([t.type(required), t.partial(optional)])
-}
