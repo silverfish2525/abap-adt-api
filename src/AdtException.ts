@@ -281,7 +281,23 @@ export function validateShape<T>(
   name: string
 ): T {
   if (guard(value)) return value
-  throw adtException(`Unexpected response shape: expected ${name}`)
+  const preview = (() => {
+    try {
+      const s = JSON.stringify(value)
+      return s.length > 240 ? s.slice(0, 237) + "..." : s
+    } catch {
+      return String(value)
+    }
+  })()
+  throw new AdtErrorException(
+    0,
+    {},
+    "INTERNAL",
+    `Unexpected response shape: expected ${name}, got ${preview}`,
+    undefined,
+    undefined,
+    undefined
+  )
 }
 
 export const isErrorMessageType = (x: string | SAPRC | undefined) =>
