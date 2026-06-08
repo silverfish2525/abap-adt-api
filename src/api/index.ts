@@ -13,7 +13,15 @@ export * from "./refactor"
 export * from "./search"
 export * from "./syntax"
 export * from "./unittest"
-export * from "./urlparser"
+export {
+  Range,
+  UriParts,
+  rangeToString,
+  uriPartsToString,
+  parseUri,
+  isUriParts,
+  uriParts
+} from "./urlparser"
 export * from "./abapgit"
 export * from "./enhancements"
 export * from "./tablecontents"
