@@ -6,6 +6,8 @@ on:
   pull_request:
     branches: [master]
 
+permissions: { contents: read }
+
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -23,7 +25,5 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: ${{ matrix.node }}
-          cache: npm
-      - run: npm ci
-      - run: npm run build
+      - run: npm install --no-audit --no-fund
       - run: npx tsc --noEmit
