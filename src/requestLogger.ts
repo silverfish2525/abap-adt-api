@@ -1,7 +1,12 @@
-import axios, { AxiosResponse } from "axios"
 import { AdtException, isAdtError, isAdtException, session_types } from "."
 import { isNumber, isObject, isString, isUndefined } from "./utilities"
-import { HeaderValue, HttpClientOptions, HttpClientResponse } from "./AdtHTTP"
+import {
+  HeaderValue,
+  HttpClientException,
+  HttpClientOptions,
+  HttpClientResponse,
+  isHttpClientException
+} from "./AdtHTTP"
 
 export interface RequestData {
   method: string
@@ -39,7 +44,7 @@ interface LoggingConfig {
 }
 
 const getLoggingData = (config: any) => {
-  if (!isObject(config)) return { id: -1, startTime: new Date(), duration: 0 }
+  if (!isObject<Record<string, any>>(config)) return { id: -1, startTime: new Date(), duration: 0 }
   const id = isNumber(config?.adtRequestNumber) ? config.adtRequestNumber : -1
   const startTime =
     config?.adtStartTime instanceof Date ? config.adtStartTime : new Date()
@@ -75,14 +80,14 @@ const convertRequest = (original?: unknown): RequestData => {
     body: isString(body) || isUndefined(body) ? body : JSON.stringify(body)
   }
 }
-const convertAxiosResponse = (original?: AxiosResponse): ResponseData => {
-  if (!original) return { headers: {}, statusCode: 0, statusMessage: "" }
-  const { headers, data, status, statusText } = original
+const convertHttpClientError = (
+  error: HttpClientException
+): { request: RequestData; response: ResponseData; config: HttpClientOptions } => {
+  const config = error.request
   return {
-    headers: headers ? { ...headers } : {},
-    statusCode: status,
-    statusMessage: statusText,
-    body: isString(data) ? data : JSON.stringify(data)
+    request: convertRequest(config),
+    response: convertResponse(error.response),
+    config
   }
 }
 
@@ -116,10 +121,17 @@ export const logError = (
 ) => {
   try {
     if (!callback) return
-    if (axios.isAxiosError(error)) {
-      const request = convertRequest(error.config)
-      const response = convertAxiosResponse(error.response!)
-      callback(createLogData(request, response, clientId, error.config, error))
+    if (isHttpClientException(error)) {
+      const converted = convertHttpClientError(error)
+      callback(
+        createLogData(
+          converted.request,
+          converted.response,
+          clientId,
+          converted.config,
+          error
+        )
+      )
     } else {
       const resp = isAdtException(error)
         ? convertResponse(error)

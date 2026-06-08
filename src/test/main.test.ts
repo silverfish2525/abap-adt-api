@@ -1,5 +1,7 @@
 // these tests call a real system.
 // will only work if there's one connected and the environment variables are set
+import { fail } from "node:assert"
+import { describe, expect, it, test } from "vitest"
 import exp from "constants"
 import {
   ADTClient,
@@ -457,8 +459,6 @@ test(
         // ignore
       }
       await c.unLock(target, handle.LOCK_HANDLE)
-    } catch (e) {
-      throw e
     } finally {
       await c.dropSession()
     }
@@ -702,7 +702,6 @@ test(
 test(
   "Usage references",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(10000) // this usually takes longer than the default 5000
     const include = "/sap/bc/adt/oo/classes/zapidummyfoobar"
     const references = await c.usageReferences(include)
 
@@ -1090,7 +1089,6 @@ endclass.`
 test(
   "user transports - older",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(8000) // this usually takes longer than the default 5000
     // in newer systems this is based on a transport configuration
     if (await c.hasTransportConfig()) return
     const transports = await c.userTransports(process.env.ADT_USER!)
@@ -1106,7 +1104,6 @@ test(
 test(
   "user transports - newer",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(8000) // this usually takes longer than the default 5000
     // in newer systems this is based on a transport configuration
     if (!(await c.hasTransportConfig())) return
     // this requires database changes
@@ -1242,7 +1239,6 @@ test(
 test(
   "revisions of func by URL",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(8000) // this occasionally takes longer than the default 5000
     const obj =
       "/sap/bc/adt/functions/groups/zapidummyfoobar/fmodules/zapidummyfoofunc"
     const revisions = await c.revisions(obj)
@@ -1347,7 +1343,6 @@ test(
 test(
   "abapGitxternalRepoInfo",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(8000) // this usually takes longer than the default 5000
     if (await hasAbapGit(c)) {
       const repoinfo = await c.gitExternalRepoInfo(
         "https://github.com/abapGit/abapGit.git"
@@ -1362,8 +1357,6 @@ test(
 test(
   "abapGitxternalRepoInfo with password",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(20000) // often takes longer than 5s
-
     if (await hasAbapGit(c)) {
       const { ADT_GIT_REPO, ADT_GIT_USER, ADT_GIT_PASS } = process.env
       if (ADT_GIT_REPO && ADT_GIT_USER && ADT_GIT_PASS) {

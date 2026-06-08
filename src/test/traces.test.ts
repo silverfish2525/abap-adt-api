@@ -1,3 +1,4 @@
+import { expect, test } from "vitest"
 import { assert } from "console"
 import { ADTClient } from "../AdtClient"
 import { TraceParameters, TracesCreationConfig } from "../api"

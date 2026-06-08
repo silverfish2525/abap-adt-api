@@ -9,7 +9,7 @@ import {
 } from "."
 import { logError, logResponse } from "./requestLogger"
 import { isString } from "./utilities"
-import { AxiosHttpClient } from "./AxiosHttpClient"
+import { FetchHttpClient } from "./FetchHttpClient"
 
 export type Method =
   | "get"
@@ -123,6 +123,33 @@ export interface HttpClient {
   request: (options: HttpClientOptions) => Promise<HttpClientResponse>
 }
 
+/**
+ * Transport-agnostic interceptors registered on the {@link AdtHTTP} layer.
+ * They wrap the call to the underlying {@link HttpClient.request}, so they
+ * keep working if the HTTP transport implementation changes.
+ */
+/**
+ * Function registered via {@link AdtHTTP.addRequestInterceptor}.
+ * It can read or modify outbound HTTP options before each request.
+ */
+export type RequestInterceptor = (
+  options: HttpClientOptions
+) => HttpClientOptions | Promise<HttpClientOptions>
+
+/**
+ * Function registered via {@link AdtHTTP.addResponseInterceptor}.
+ * It can read or modify HTTP responses after they arrive but before
+ * they are returned to the caller.
+ */
+export type ResponseInterceptor = (
+  response: HttpClientResponse,
+  options: HttpClientOptions
+) => HttpClientResponse | Promise<HttpClientResponse>
+
+export interface InterceptorHandle {
+  dispose(): void
+}
+
 export class HttpClientException extends Error {
   constructor(
     message: string,
@@ -156,6 +183,8 @@ export class AdtHTTP {
   private httpclient: HttpClient
   private debugCallback?: LogCallback
   private loginPromise?: Promise<HttpClientResponse>
+  private requestInterceptors: RequestInterceptor[] = []
+  private responseInterceptors: ResponseInterceptor[] = []
   get isStateful(): boolean {
     return (
       this.stateful === session_types.stateful ||
@@ -204,7 +233,7 @@ export class AdtHTTP {
       [CSRF_TOKEN_HEADER]: FETCH_CSRF_TOKEN
     }
     this.httpclient = isString(baseURLOrClient)
-      ? new AxiosHttpClient(baseURLOrClient, config)
+      ? new FetchHttpClient(baseURLOrClient, config)
       : baseURLOrClient
     this.debugCallback = config?.debugCallback
     if (config?.keepAlive)
@@ -280,6 +309,52 @@ export class AdtHTTP {
       } else throw adtErr
     }
   }
+  /**
+   * Register a function that can read or modify outbound HTTP options
+   * before each request. Interceptors run in registration order and are
+   * awaited sequentially. If an interceptor throws, the request is not
+   * sent and the error propagates to the caller.
+   *
+   * Use cases: auth-token injection, comm logging, request shaping.
+   *
+   * @returns a handle whose dispose() removes the interceptor. Long-lived
+   *   clients should dispose interceptors that are no longer needed to
+   *   avoid unbounded retention.
+   */
+  addRequestInterceptor(fn: RequestInterceptor): InterceptorHandle {
+    this.requestInterceptors.push(fn)
+    return {
+      dispose: () => {
+        const i = this.requestInterceptors.indexOf(fn)
+        if (i >= 0) this.requestInterceptors.splice(i, 1)
+      }
+    }
+  }
+
+  /**
+   * Register a function that can read or modify HTTP responses after they
+   * arrive but before they're returned to the caller. Runs in registration
+   * order, awaited sequentially.
+   *
+   * Note: response interceptors only fire on successful round-trips. They
+   * do NOT fire on transport-level failures (network errors, timeouts);
+   * those still propagate through the existing exception path. Retry-on-
+   * transport-failure is therefore not expressible via this API today.
+   *
+   * Use cases: response shaping, telemetry, comm logging on success/4xx/5xx.
+   *
+   * @returns a handle whose dispose() removes the interceptor.
+   */
+  addResponseInterceptor(fn: ResponseInterceptor): InterceptorHandle {
+    this.responseInterceptors.push(fn)
+    return {
+      dispose: () => {
+        const i = this.responseInterceptors.indexOf(fn)
+        if (i >= 0) this.responseInterceptors.splice(i, 1)
+      }
+    }
+  }
+
   private keep_session = async () => {
     if (this.needKeepalive && this.loggedin)
       await this._request("/sap/bc/adt/compatibility/graph", {}).catch(() => {})
@@ -338,7 +413,14 @@ export class AdtHTTP {
     try {
       if (this.getToken && !this.bearer) this.bearer = await this.getToken()
       if (this.bearer) headers.Authorization = `bearer ${this.bearer}`
-      const response = await this.httpclient.request(config)
+      let finalConfig: HttpClientOptions = config
+      for (const interceptor of this.requestInterceptors) {
+        finalConfig = await interceptor(finalConfig)
+      }
+      let response = await this.httpclient.request(finalConfig)
+      for (const interceptor of this.responseInterceptors) {
+        response = await interceptor(response, finalConfig)
+      }
 
       this.updateCookies(response)
       if (response.status >= 400) throw fromException(response, config)

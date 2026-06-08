@@ -1,3 +1,4 @@
+import { expect, test } from "vitest"
 import { URL } from "url"
 import { BindingService, BindingServiceResult, decodeQueryResult, extractBindingLinks, parseBindingDetails, parseQueryResponse, parseServiceBinding, servicePreviewUrl } from "../api/tablecontents"
 import { fullParse, xmlArray, xmlNodeAttr } from "../utilities"

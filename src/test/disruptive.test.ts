@@ -2,6 +2,8 @@
 // these tests call a real system.
 // will only work if there's one connected and the environment variables are set
 // will actually change the data on the server, run at your own risk
+import { fail } from "node:assert"
+import { afterAll, expect, it, test } from "vitest"
 import { session_types } from "../"
 import { NewObjectOptions } from "../"
 import { AdtLock } from "../"
@@ -165,7 +167,6 @@ test("write_program", async () => {
 
 test("save with transport", async () => {
   if (!enableWrite(new Date())) return
-  jest.setTimeout(18000)
   await doRunTest(async (c: ADTClient) => {
     const url =
       "/sap/bc/adt/oo/classes/zapidummyfoobar/includes/implementations"
@@ -227,34 +228,30 @@ test("Create inactive and try to activate", async () => {
     await c.dropSession()
     handle = undefined
 
-    try {
-      // CREATE
-      // use a stateless clone as regular calls leave the backend in a weird state
-      await c.statelessClone.createObject(options)
-      c.stateful = session_types.stateful
-      statefulClients.add(c)
-      handle = await c.lock(newobject)
-      expect(handle.LOCK_HANDLE).not.toBe("")
-      // WRITE CONTENTS
-      await c.setObjectSource(
-        newobject + "/source/main",
-        contents,
-        handle.LOCK_HANDLE
-      )
-      await c.unLock(newobject, handle.LOCK_HANDLE)
-      // ACTIVATE
-      const result = await c.activate(
-        "zadttestinactive",
-        "/sap/bc/adt/programs/programs/zadttestinactive"
-      )
-      expect(result).toBeDefined()
-      expect(result.success).toBe(false)
-      handle = await c.lock(newobject)
-      // DELETE
-      await c.deleteObject(newobject, handle.LOCK_HANDLE)
-    } catch (e) {
-      throw e
-    }
+    // CREATE
+    // use a stateless clone as regular calls leave the backend in a weird state
+    await c.statelessClone.createObject(options)
+    c.stateful = session_types.stateful
+    statefulClients.add(c)
+    handle = await c.lock(newobject)
+    expect(handle.LOCK_HANDLE).not.toBe("")
+    // WRITE CONTENTS
+    await c.setObjectSource(
+      newobject + "/source/main",
+      contents,
+      handle.LOCK_HANDLE
+    )
+    await c.unLock(newobject, handle.LOCK_HANDLE)
+    // ACTIVATE
+    const result = await c.activate(
+      "zadttestinactive",
+      "/sap/bc/adt/programs/programs/zadttestinactive"
+    )
+    expect(result).toBeDefined()
+    expect(result.success).toBe(false)
+    handle = await c.lock(newobject)
+    // DELETE
+    await c.deleteObject(newobject, handle.LOCK_HANDLE)
   })
 })
 
@@ -361,7 +358,6 @@ test("Create and delete a package", async () => {
 
 test("Release a transport", async () => {
   if (!enableWrite(new Date())) return
-  jest.setTimeout(8000) // this usually takes longer than the default 5000
   await doRunTest(async (c: ADTClient) => {
     const transp = await c.createTransport(
       "/sap/bc/adt/oo/classes/zapidummytestcreation/source/main",
@@ -509,7 +505,6 @@ test("create and pull AbapGit Repo", async () => {
     "https://github.com/marcellourbani/adt_api_dummy_test_repository.git"
   const PACKAGENAME = "$ADTAPI_TEST_GIT_REPO_DUMMY"
   const OBJECT = "/sap/bc/adt/programs/programs/zadtapi_test_git_program_dummy"
-  jest.setTimeout(25000) // 5 seconds are a bit tight
   await doRunTest(async (c: ADTClient) => {
     if (await hasAbapGit(c)) {
       const getRepo = async () => {
@@ -559,7 +554,6 @@ test("create and pull AbapGit Repo", async () => {
 test(
   "rename",
   runTest(async (c: ADTClient) => {
-    jest.setTimeout(8000) // this usually takes longer than the default 5000
     if (!enableWrite(new Date())) return
     const uri = "/sap/bc/adt/oo/classes/zapiadt_testcase_class1/source/main"
     const renameEvaluate = await c.renameEvaluate(uri, 22, 11, 11)
@@ -674,7 +668,7 @@ test(
       const exemption = await c.atcRequestExemption(proposal)
       if (exemption.type === "E") fail(exemption.message)
     } catch (error) {
-      fail(error)
+      fail(error instanceof Error ? error : String(error))
     }
   })
 )
