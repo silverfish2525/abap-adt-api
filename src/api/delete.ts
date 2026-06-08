@@ -1,6 +1,6 @@
 import { ValidateObjectUrl, ValidateStateful } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
-import { fullParse, xmlNodeAttr } from "../utilities"
+import { XmlNode, fullParse, xmlNodeAttr } from "../utilities"
 
 export interface RegistrationInfo {
   developer: {
@@ -23,10 +23,10 @@ export async function objectRegistrationInfo(h: AdtHTTP, objectUrl: string) {
   const response = await h.request("/sap/bc/adt/sscr/registration/objects", {
     qs: { uri: objectUrl }
   })
-  const raw = fullParse(response.body)["reg:objectRegistrationResponse"]
+  const raw = fullParse(response.body)["reg:objectRegistrationResponse"] as XmlNode
   return {
-    developer: xmlNodeAttr(raw["reg:developer"]),
-    object: xmlNodeAttr(raw["reg:object"]),
+    developer: xmlNodeAttr(raw["reg:developer"] as XmlNode),
+    object: xmlNodeAttr(raw["reg:object"] as XmlNode),
     ...xmlNodeAttr(raw)
   } as RegistrationInfo
 }

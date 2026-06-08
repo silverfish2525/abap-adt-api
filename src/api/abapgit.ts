@@ -10,7 +10,10 @@ import {
   toXmlAttributes,
   encodeEntity,
   toInt,
-  parse
+  parse,
+  XmlNode,
+  XmlValue,
+  asXmlNode
 } from "../utilities"
 
 
@@ -117,23 +120,28 @@ export async function gitRepos(h: AdtHTTP) {
     parseTagValue: false,
     removeNSPrefix: true
   })
-  return xmlArray(raw, "repositories", "repository").map((x: any) => {
-    const {
-      key,
-      package: sapPackage,
-      url,
-      status,
-      status_text,
-    } = x
+  return xmlArray(raw, "repositories", "repository").map((x: XmlNode) => {
+    const key = String(x.key || "")
+    const sapPackage = String(x.package || "")
+    const url = String(x.url || "")
+    const status = x.status ? String(x.status) : undefined
+    const status_text = x.status_text ? String(x.status_text) : undefined
     // tslint:disable: variable-name
-    const branch_name = x.branch_name || x.branchName || ""
-    const created_by = x.created_by || x.createdBy || ""
-    const created_at = x.created_at || x.createdAt || ""
-    const created_email = x.created_email || x.createdEmail || ""
-    const deserialized_by = x.deserialized_by || x.deserializedBy || ""
-    const deserialized_email = x.deserialized_email || x.deserializedEmail || ""
-    const deserialized_at = x.deserialized_at || x.deserializedAt || ""
-    const links = xmlArray(x, "link").map(xmlNodeAttr)
+    const branch_name = String(x.branch_name || x.branchName || "")
+    const created_by = String(x.created_by || x.createdBy || "")
+    const created_at = String(x.created_at || x.createdAt || "")
+    const created_email = x.created_email ? String(x.created_email) : x.createdEmail ? String(x.createdEmail) : undefined
+    const deserialized_by = x.deserialized_by ? String(x.deserialized_by) : x.deserializedBy ? String(x.deserializedBy) : undefined
+    const deserialized_email = x.deserialized_email ? String(x.deserialized_email) : x.deserializedEmail ? String(x.deserializedEmail) : undefined
+    const deserialized_at = x.deserialized_at ? String(x.deserialized_at) : x.deserializedAt ? String(x.deserializedAt) : undefined
+    const links = xmlArray(x, "link").map(node => {
+      const attrs = xmlNodeAttr(node as XmlNode)
+      return {
+        href: String(attrs.href || ""),
+        rel: String(attrs.rel || ""),
+        type: attrs.type ? String(attrs.type) : undefined,
+      }
+    })
     const repo: GitRepo = {
       key,
       sapPackage,
@@ -144,7 +152,7 @@ export async function gitRepos(h: AdtHTTP) {
       created_email,
       deserialized_by,
       deserialized_email,
-      deserialized_at: deserialized_at && parseDate(deserialized_at),
+      deserialized_at: deserialized_at ? parseDate(deserialized_at) : undefined,
       status,
       status_text,
       links,
@@ -177,24 +185,24 @@ export async function externalRepoInfo(
   })
   const raw = fullParse(response.body, { removeNSPrefix: true })
   // tslint:disable-next-line: variable-name
-  const access_mode = xmlNode(raw, "externalRepoInfo", "accessMode")
+  const access_mode = String(xmlNode(raw, "externalRepoInfo", "accessMode") || "")
   const branches = xmlArray(
     raw,
     "externalRepoInfo",
     "branch"
-  ).map((branch: any) => ({
-    name: branch.name,
-    type: branch.type,
-    sha1: branch.sha1,
-    display_name: branch.displayName,
-    is_head: boolFromAbap(branch && branch.is_head),
+  ).map((branch: XmlNode) => ({
+    name: branch.name as string,
+    type: branch.type as string,
+    sha1: branch.sha1 as string,
+    display_name: branch.displayName as string,
+    is_head: boolFromAbap(branch && (branch.is_head as string)),
   }))
   return { access_mode, branches } as GitExternalInfo
 }
 
-const parseObjects = (body: any) => {
+const parseObjects = (body: string) => {
   const raw = fullParse(body)
-  return xmlArray(raw, "objects", "object").map((r: any) => {
+  return xmlArray(raw, "objects", "object").map((r: XmlNode) => {
     const {
       type,
       name,
@@ -204,13 +212,14 @@ const parseObjects = (body: any) => {
       msgText,
     } = r
     const obj: GitObject = {
-      obj_type: type,
-      obj_name: name,
-      package: pkg,
-      obj_status: status,
-      msg_type: msgType,
-      msg_text: msgText,
+      obj_type: type as string,
+      obj_name: name as string,
+      package: pkg as string,
+      obj_status: status as string,
+      msg_type: msgType as string,
+      msg_text: msgText as string,
     }
+    return obj
   })
 }
 
@@ -282,8 +291,8 @@ export async function unlinkRepo(h: AdtHTTP, repoId: string) {
   })
 }
 const deserializeStaging = (body: string) => {
-  const raw = xmlNode(fullParse(body), "abapgitstaging:abapgitstaging")
-  const parsefile = (x: any) =>
+  const raw = xmlNode(fullParse(body), "abapgitstaging:abapgitstaging") as XmlNode
+  const parsefile = (x: XmlNode) =>
   ({
     ...stripNs(xmlNodeAttr(x)),
     links: xmlArray(x, "atom:link")
@@ -291,7 +300,7 @@ const deserializeStaging = (body: string) => {
       .map(stripNs)
       .map((l) => ({ ...l, href: l.href })),
   } as GitStagingFile)
-  const parseObject = (x: any) => {
+  const parseObject = (x: XmlNode) => {
     const attrs = stripNs(xmlNodeAttr(x))
     const abapGitFiles = xmlArray(x, "abapgitstaging:abapgitfile").map(
       parsefile
@@ -314,10 +323,10 @@ const deserializeStaging = (body: string) => {
     "abapgitstaging:ignored_objects",
     "abapgitstaging:abapgitobject"
   ).map(parseObject)
-  const commentNode = xmlNode(raw, "abapgitstaging:abapgit_comment")
+  const commentNode = xmlNode(raw, "abapgitstaging:abapgit_comment") as XmlNode
   const extractUser = (p: string) =>
-    stripNs(xmlNodeAttr(xmlNode(commentNode, p))) as GitUser
-  const comment = commentNode["@_abapgitstaging:comment"] || ""
+    stripNs(xmlNodeAttr(asXmlNode(xmlNode(commentNode, p)))) as GitUser
+  const comment = (commentNode["@_abapgitstaging:comment"] as string) || ""
   const author = extractUser("abapgitstaging:author")
   const committer = extractUser("abapgitstaging:author")
   const result: GitStaging = {
@@ -457,11 +466,11 @@ export async function remoteRepoInfo(
     body,
     method: "POST",
   })
-  const raw = parse(resp.body)?.repository_external
+  const raw = parse(resp.body)?.repository_external as XmlNode
   const { access_mode, branches } = raw
   return {
-    access_mode,
-    branches: xmlArray(branches, "branch"),
+    access_mode: String(access_mode || ""),
+    branches: xmlArray<GitBranch>(branches, "branch"),
   } as GitRemoteInfo
 }
 

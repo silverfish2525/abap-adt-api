@@ -2,11 +2,13 @@ import { adtException, ValidateObjectUrl } from "../AdtException"
 import { SAPRC } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
 import {
+  asXmlNode,
   fullParse,
   JSON2AbapXML,
   parse,
   parseSapDate,
   toSapDate,
+  XmlNode,
   xmlArray,
   xmlNode,
   xmlNodeAttr
@@ -117,7 +119,7 @@ function extractLocks(raw: any): TransportLock | undefined {
     )
     return {
       HEADER: holder.REQ_HEADER,
-      OBJECT_KEY: xmlNode(lock, "OBJECT_KEY"),
+      OBJECT_KEY: xmlNode(lock, "OBJECT_KEY") as TransportLock["OBJECT_KEY"],
       TASKS
     }
   } catch {
@@ -155,9 +157,10 @@ export async function transportInfo(
   })
   // return parsePackageResponse(response.body)
   // tslint:disable-next-line: prefer-const
-  let { REQUESTS, LOCKS, MESSAGES, ...header } = parse(response.body)[
-    "asx:abap"
-  ]["asx:values"].DATA
+  const data = (asXmlNode(parse(response.body)["asx:abap"]) as XmlNode)[
+    "asx:values"
+  ] as XmlNode
+  let { REQUESTS, LOCKS, MESSAGES, ...header } = data.DATA as XmlNode
   if (MESSAGES) {
     MESSAGES = xmlArray(MESSAGES, "CTS_MESSAGE").map((m: any) => {
       // tslint:disable-next-line: prefer-const
@@ -173,7 +176,7 @@ export async function transportInfo(
     })
   }
   const TRANSPORTS = extractTransports(REQUESTS)
-  return { ...header, LOCKS: extractLocks(LOCKS), TRANSPORTS }
+  return { ...header, LOCKS: extractLocks(LOCKS), TRANSPORTS } as TransportInfo
 }
 
 export async function createTransport(
@@ -232,35 +235,42 @@ export interface TransportTarget {
 export interface TransportsOfUser {
   workbench: TransportTarget[]
   customizing: TransportTarget[]
+  /**
+   * Transport-of-copies bucket. Populated when the SAP server returns a
+   * `<tm:transportofcopies>` element (driven by the `TransportOfCopies`
+   * configuration property — see `CL_CTS_ADT_TM_CONFIG_HANDLER`). Older
+   * downstream code that constructs synthetic `TransportsOfUser` values
+   * may omit this field, which is why it is optional.
+   */
+  transportofcopies?: TransportTarget[]
 }
-const parseTask = (t: any) => {
+const parseTask = (t: XmlNode) => {
   const task = {
     ...xmlNodeAttr(t),
-    links: xmlArray(t, "atom:link").map(xmlNodeAttr),
-    objects: xmlArray(t, "tm:abap_object").map(xmlNodeAttr)
-  }
-  if (task["tm:desc"]) task["tm:desc"] = task["tm:desc"]
-  return task as TransportTask
+    links: xmlArray(t, "atom:link").map(xmlNodeAttr) as unknown as Link[],
+    objects: xmlArray(t, "tm:abap_object").map(xmlNodeAttr) as unknown as TransportObject[]
+  } as Record<string, any>
+  return task as unknown as TransportTask
 }
-const parseRequest = (r: any) => {
+const parseRequest = (r: XmlNode) => {
   const request: TransportRequest = {
     ...parseTask(r),
     tasks: xmlArray(r, "tm:task").map(parseTask)
   }
   return request
 }
-const parseTargets = (s: any) => ({
+const parseTargets = (s: XmlNode) => ({
   ...xmlNodeAttr(s),
   modifiable: xmlArray(s, "tm:modifiable", "tm:request").map(parseRequest),
   released: xmlArray(s, "tm:released", "tm:request").map(parseRequest)
-})
+}) as unknown as TransportTarget
 
 export async function transportDetails(h: AdtHTTP, transportNumber: string) {
   const Accept = "application/vnd.sap.adt.transportorganizer.v1+xml"
   const url = `/sap/bc/adt/cts/transportrequests/${transportNumber}`
   const raw = await h.request(url, { headers: { Accept } })
   const parsed = fullParse(raw.body)
-  return parseRequest(xmlNode(parsed, "tm:root", "tm:request"))
+  return parseRequest(xmlNode(parsed, "tm:root", "tm:request") as XmlNode)
 }
 
 export async function userTransports(h: AdtHTTP, user: string, targets = true) {
@@ -280,7 +290,14 @@ export async function userTransports(h: AdtHTTP, user: string, targets = true) {
     "tm:target"
   ).map(parseTargets)
 
-  const retval: TransportsOfUser = { workbench, customizing }
+  const transportofcopies = xmlArray(
+    raw,
+    "tm:root",
+    "tm:transportofcopies",
+    "tm:target"
+  ).map(parseTargets)
+
+  const retval: TransportsOfUser = { workbench, customizing, transportofcopies }
   return retval
 }
 
@@ -305,7 +322,14 @@ export async function transportsByConfig(
     "tm:target"
   ).map(parseTargets)
 
-  const retval: TransportsOfUser = { workbench, customizing }
+  const transportofcopies = xmlArray(
+    raw,
+    "tm:root",
+    "tm:transportofcopies",
+    "tm:target"
+  ).map(parseTargets)
+
+  const retval: TransportsOfUser = { workbench, customizing, transportofcopies }
   return retval
 }
 
@@ -410,7 +434,7 @@ export async function transportRelease(
     "tm:root",
     "tm:releasereports",
     "chkrun:checkReport"
-  ).map((r: any) => {
+  ).map((r: XmlNode) => {
     return {
       ...xmlNodeAttr(r),
       messages: xmlArray(
@@ -420,7 +444,7 @@ export async function transportRelease(
       ).map(xmlNodeAttr)
     }
   })
-  return reports as TransportReleaseReport[]
+  return reports as unknown as TransportReleaseReport[]
 }
 export interface TransportOwnerResponse {
   "tm:targetuser": string
@@ -444,7 +468,7 @@ export async function transportSetOwner(
     }
   )
   const raw = fullParse(response.body)
-  return xmlNodeAttr(xmlNode(raw, "tm:root")) as TransportOwnerResponse
+  return xmlNodeAttr(asXmlNode(xmlNode(raw, "tm:root"))) as unknown as TransportOwnerResponse
 }
 
 export interface TransportAddUserResponse {
@@ -473,7 +497,7 @@ export async function transportAddUser(
     }
   )
   const raw = fullParse(response.body)
-  return xmlNodeAttr(xmlNode(raw, "tm:root")) as TransportAddUserResponse
+  return xmlNodeAttr(asXmlNode(xmlNode(raw, "tm:root"))) as unknown as TransportAddUserResponse
 }
 
 export interface SystemUser {
@@ -486,8 +510,11 @@ export async function systemUsers(h: AdtHTTP) {
     headers: { Accept: "application/atom+xml;type=feed" }
   })
   const raw = parse(response.body)
-  return xmlArray(raw, "atom:feed", "atom:entry").map(
-    (r: any): SystemUser => ({ id: r["atom:id"], title: r["atom:title"] })
+  return xmlArray<XmlNode>(raw, "atom:feed", "atom:entry").map(
+    (r): SystemUser => ({
+      id: (r["atom:id"] as string) || "",
+      title: (r["atom:title"] as string) || ""
+    })
   )
 }
 
@@ -507,7 +534,7 @@ export async function transportReference(
     }
   )
   const raw = fullParse(response.body)
-  const link = xmlNodeAttr(xmlNode(raw, "tm:root", "atom:link"))
+  const link = xmlNodeAttr(asXmlNode(xmlNode(raw, "tm:root", "atom:link")))
   return link.href as string
 }
 const parseTransportConfigItemList = (body: string) => {
@@ -516,14 +543,16 @@ const parseTransportConfigItemList = (body: string) => {
     raw,
     "configurations:configurations",
     "configuration:configuration"
-  ).map((conf: any) => {
-    const {
-      "atom:link": { "@_href": link, "@_etag": etag },
-      ...rest
-    } = conf
-    const { createdAt, changedAt, ...attrs } = xmlNodeAttr(rest)
+  ).map((conf: XmlNode) => {
+    const linkNode = conf["atom:link"] as XmlNode
+    const link = (linkNode?.["@_href"] as string) || ""
+    const etag = (linkNode?.["@_etag"] as string) || ""
+    const { ["atom:link"]: _link, ...rest } = conf
+    const attrs = xmlNodeAttr(rest as XmlNode)
+    const createdAt = attrs.createdAt as string
+    const changedAt = attrs.changedAt as string
     const item: TransportConfigurationEntry = {
-      ...attrs,
+      ...(attrs as unknown as Omit<TransportConfigurationEntry, "link" | "etag" | "createdAt" | "changedAt">),
       link,
       etag,
       createdAt: Date.parse(createdAt),
@@ -549,8 +578,8 @@ const parseTransportConfig = (r: string) => {
     "configuration:configuration",
     "configuration:properties",
     "configuration:property"
-  ).map((p: any) => {
-    return { key: p["@_key"], value: p["#text"] }
+  ).map((p: XmlNode) => {
+    return { key: p["@_key"] as string, value: p["#text"] as string }
   })
   const cfg: any = {}
   for (const { key, value } of props) cfg[key] = value

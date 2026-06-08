@@ -1,3 +1,4 @@
+import { z } from "zod"
 import {
   AdtHTTP,
   HttpClientException,
@@ -6,6 +7,7 @@ import {
   RequestOptions
 } from "./AdtHTTP"
 import {
+  asXmlNode,
   fullParse,
   hasMessage,
   isNativeError,
@@ -14,9 +16,6 @@ import {
   isString,
   xmlArray
 } from "./utilities"
-import { isLeft } from "fp-ts/lib/These"
-import * as t from "io-ts"
-import reporter from "io-ts-reporters"
 const ADTEXTYPEID = Symbol.for("ADT EXCEPTION")
 const CSRFEXTYPEID = Symbol.for("BAD CSRF")
 const HTTPEXTYPEID = Symbol.for("HTTP EXCEPTION")
@@ -38,7 +37,7 @@ export interface ExceptionProperties {
 }
 
 const isResponse = (r: any): r is HttpClientResponse =>
-  isObject(r) && !!r?.status && isString(r?.statusText)
+  isObject<Record<string, any>>(r) && !!r?.status && isString(r?.statusText)
 
 export class AdtErrorException extends Error {
   get typeID(): symbol {
@@ -108,7 +107,6 @@ export class AdtErrorException extends Error {
   }
 }
 
-// tslint:disable-next-line:max-classes-per-file
 class AdtCsrfException extends Error {
   get typeID(): symbol {
     return CSRFEXTYPEID
@@ -120,7 +118,6 @@ class AdtCsrfException extends Error {
     super()
   }
 }
-// tslint:disable-next-line:max-classes-per-file
 class AdtHttpException extends Error {
   get typeID(): symbol {
     return HTTPEXTYPEID
@@ -175,14 +172,15 @@ const simpleError = (response: HttpClientResponse) =>
 
 const isCsrfException = (r: HttpClientResponse) =>
   (r.status === 403 && r.headers["x-csrf-token"] === "Required") ||
-  (r.status === 400 && r.statusText === "Session timed out") // hack to get login refresh to work on expired sessions
+  (r.status === 400 && r.statusText === "Session timed out")
 
 export const fromResponse = (data: string, response: HttpClientResponse) => {
   if (!data) return simpleError(response)
   if (data.match(/CSRF/)) return new AdtCsrfException(data)
   const raw = fullParse(data as string)
-  const root = raw["exc:exception"]
+  const root = asXmlNode(raw["exc:exception"])
   if (!root && response.status === 401) return simpleError(response)
+  if (!root) throw new Error("Missing exc:exception in ADT error response")
   const getf = (base: any, idx: string) => (base ? base[idx] : "")
   const properties: Record<string, string> = {}
   xmlArray(root, "properties", "entry").forEach((p: any) => {
@@ -193,8 +191,8 @@ export const fromResponse = (data: string, response: HttpClientResponse) => {
   return new AdtErrorException(
     response.status,
     properties,
-    root.type["@_id"],
-    root.message["#text"],
+    getf(root.type, "@_id"),
+    getf(root.message, "#text"),
     undefined,
     getf(root.namespace, "@_id"),
     getf(root.localizedMessage, "#text")
@@ -217,7 +215,7 @@ export const fromError = (error: unknown): AdtException => {
     if (hasMessage(error))
       return new AdtErrorException(500, {}, "", error.message)
   } catch (error) {}
-  return AdtErrorException.create(500, {}, "Unknown error", `${error}`) // hopefully will never happen
+  return AdtErrorException.create(500, {}, "Unknown error", `${error}`)
 }
 
 function fromExceptionOrResponse_int(
@@ -244,7 +242,7 @@ export function fromException(
     (!isNativeError(errOrResp) ||
       (isNativeError(errOrResp) && !isHttpClientException(errOrResp)))
   )
-    return AdtErrorException.create(500, {}, "Unknown error", `${errOrResp}`) // hopefully will never happen
+    return AdtErrorException.create(500, {}, "Unknown error", `${errOrResp}`)
   return fromExceptionOrResponse_int(errOrResp, config)
 }
 
@@ -253,7 +251,7 @@ export function adtException(message: string, number = 0) {
 }
 
 export function ValidateObjectUrl(url: string) {
-  if (url.match(/^\/sap\/bc\/adt\/[a-z]+\/[a-zA-Z%\$]?[\w%]+/)) return // valid
+  if (url.match(/^\/sap\/bc\/adt\/[a-z]+\/[a-zA-Z%\$]?[\w%]+/)) return
   throw new AdtErrorException(
     0,
     {},
@@ -271,12 +269,25 @@ export function ValidateStateful(h: AdtHTTP) {
     "This operation can only be performed in stateful mode"
   )
 }
-export const validateParseResult = <T>(parseResult: t.Validation<T>): T => {
-  if (isLeft(parseResult)) {
-    const messages = reporter.report(parseResult)
-    throw adtException(messages.slice(0, 3).join("\n"))
-  }
-  return parseResult.right
+
+export function validateShape<T extends z.ZodTypeAny>(
+  value: unknown,
+  schema: T,
+  name: string
+): z.infer<T> {
+  const r = schema.safeParse(value)
+  if (r.success) return r.data
+  const issue = r.error.issues[0]
+  const path = issue?.path?.length ? ` at ${issue.path.join(".")}` : ""
+  throw new AdtErrorException(
+    0,
+    {},
+    "INTERNAL",
+    `Unexpected response shape: expected ${name}${path}: ${issue?.message || "invalid value"}`,
+    undefined,
+    undefined,
+    undefined
+  )
 }
 
 export const isErrorMessageType = (x: string | SAPRC | undefined) =>

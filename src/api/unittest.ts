@@ -1,8 +1,8 @@
-import * as t from "io-ts"
-import { validateParseResult } from ".."
+import { z } from "zod"
+import { validateShape } from ".."
 import { AdtHTTP } from "../AdtHTTP"
 import { fullParse, xmlArray, xmlFlatArray, xmlNodeAttr } from "../utilities"
-import { parseUri, uriParts } from "./urlparser"
+import { parseUri, UriParts } from "./urlparser"
 
 export interface UnitTestStackEntry {
   "adtcore:uri": string
@@ -52,13 +52,20 @@ export interface UnitTestClass {
   alerts: UnitTestAlert[]
 }
 
-const markerCodec = t.type({
-  kind: t.string,
-  keepsResult: t.boolean,
-  location: uriParts
+export const UnitTestOccurrenceMarker = z.object({
+  kind: z.string(),
+  keepsResult: z.boolean(),
+  location: UriParts
 })
+export type UnitTestOccurrenceMarker = z.infer<typeof UnitTestOccurrenceMarker>
 
-export type UnitTestOccurrenceMarker = t.TypeOf<typeof markerCodec>
+export const isUriParts = (x: unknown): x is UriParts => UriParts.safeParse(x).success
+
+export const isUnitTestOccurrenceMarker = (
+  x: unknown
+): x is UnitTestOccurrenceMarker => UnitTestOccurrenceMarker.safeParse(x).success
+
+const UnitTestOccurrenceMarkerArray = z.array(UnitTestOccurrenceMarker)
 
 const parseDetail = (alert: any) =>
   xmlArray(alert, "details", "detail").reduce((result: string[], d: any) => {
@@ -69,21 +76,17 @@ const parseDetail = (alert: any) =>
     return main ? [...result, main + children] : result
   }, [])
 const parseStack = (alert: any) =>
-  xmlArray(alert, "stack", "stackEntry").map(x => {
-    const entry = xmlNodeAttr(x)
-    entry["adtcore:description"] = entry["adtcore:description"]
-    return entry
-  })
+  xmlArray(alert, "stack", "stackEntry").map(x => xmlNodeAttr(x))
 const parseAlert = (alert: any) => ({
   ...xmlNodeAttr(alert),
   details: parseDetail(alert),
   stack: parseStack(alert),
   title: alert?.title || ""
-})
+}) as unknown as UnitTestAlert
 const parseMethod = (method: any): UnitTestMethod => ({
   ...xmlNodeAttr(method),
   alerts: xmlArray(method, "alerts", "alert").map(parseAlert)
-})
+}) as unknown as UnitTestMethod
 
 export interface UnitTestRunFlags {
   harmless: boolean
@@ -147,7 +150,7 @@ export async function runUnitTest(
       ...xmlNodeAttr(c),
       alerts: xmlArray(c, "alerts", "alert").map(parseAlert),
       testmethods: xmlFlatArray(c, "testMethods", "testMethod").map(parseMethod)
-    }
+    } as unknown as UnitTestClass
   })
   return classes
 }
@@ -217,8 +220,8 @@ export async function unitTestOccurrenceMarkers(
   ).map(o => {
     const { kind, keepsResult } = xmlNodeAttr(o)
     const { uri } = xmlNodeAttr((o as any)?.objectReference)
-    return { kind, keepsResult, location: parseUri(uri) }
+    return { kind, keepsResult, location: parseUri(uri as string) }
   })
 
-  return validateParseResult(t.array(markerCodec).decode(markers))
+  return validateShape(markers, UnitTestOccurrenceMarkerArray, "UnitTestOccurrenceMarker[]")
 }

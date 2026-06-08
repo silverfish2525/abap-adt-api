@@ -1,6 +1,6 @@
 import { ValidateObjectUrl, ValidateStateful } from "../AdtException"
 import { AdtHTTP, RequestOptions } from "../AdtHTTP"
-import { xmlArray, xmlNode, xmlNodeAttr, xmlRoot, fullParse, btoa, parse, encodeEntity } from "../utilities"
+import { XmlNode, asXmlNode, xmlArray, xmlNode, xmlNodeAttr, xmlRoot, fullParse, btoa, parse, encodeEntity } from "../utilities"
 import { ObjectVersion } from "./objectstructure"
 
 export interface AdtLock {
@@ -74,7 +74,7 @@ export async function lock(
     qs
   })
   const raw = parse(response.body)
-  const locks = xmlArray(raw, "asx:abap", "asx:values", "DATA")
+  const locks = xmlArray<AdtLock>(raw, "asx:abap", "asx:values", "DATA")
   return locks[0] as AdtLock
 }
 
@@ -255,10 +255,10 @@ export async function getDomainProperties(
   const qs = version ? { version } : {}
   const response = await h.request(domainUrl, { qs })
   const res = fullParse(response.body)
-  const root = xmlRoot(res)
-  const attr = xmlNodeAttr(root) || {}
+  const root = xmlRoot(res) as XmlNode
+  const attr = (xmlNodeAttr(root) || {}) as Record<string, string>
 
-  const packageAttr = xmlNodeAttr(xmlNode(root, "adtcore:packageRef")) || {}
+  const packageAttr = (xmlNodeAttr(asXmlNode(xmlNode(root, "adtcore:packageRef"))) || {}) as Record<string, string>
 
   const metaData: DomainMetaData = {
     name: attr["adtcore:name"],
@@ -272,10 +272,10 @@ export async function getDomainProperties(
     packageUri: packageAttr["adtcore:uri"]
   }
 
-  const content = xmlNode(root, "doma:content")
-  const typeInfo = xmlNode(content, "doma:typeInformation") || {}
-  const outputInfo = xmlNode(content, "doma:outputInformation") || {}
-  const valueInfoNode = xmlNode(content, "doma:valueInformation")
+  const content = xmlNode(root, "doma:content") as XmlNode
+  const typeInfo = ((xmlNode(content, "doma:typeInformation") as XmlNode) || {}) as Record<string, any>
+  const outputInfo = ((xmlNode(content, "doma:outputInformation") as XmlNode) || {}) as Record<string, any>
+  const valueInfoNode = asXmlNode(xmlNode(content, "doma:valueInformation"))
 
   const typeInformation: DomainTypeInformation = {
     datatype: typeInfo["doma:datatype"] || "",
@@ -294,7 +294,7 @@ export async function getDomainProperties(
 
   let valueInformation: DomainValueInformation | undefined
   if (valueInfoNode) {
-    const valueTableRefAttr = xmlNodeAttr(xmlNode(valueInfoNode, "doma:valueTableRef")) || {}
+    const valueTableRefAttr = (xmlNodeAttr(asXmlNode(xmlNode(valueInfoNode, "doma:valueTableRef"))) || {}) as Record<string, string>
     const fixValueArr = xmlArray<any>(valueInfoNode, "doma:fixValues", "doma:fixValue")
     const fixValues: DomainFixValue[] = fixValueArr.map(fv => ({
       low: fv["doma:low"] || "",
@@ -484,10 +484,10 @@ export async function getDataElementProperties(
   const qs = version ? { version } : {}
   const response = await h.request(dataElementUrl, { qs })
   const res = fullParse(response.body)
-  const root = xmlRoot(res)
-  const attr = xmlNodeAttr(root)
+  const root = xmlRoot(res) as XmlNode
+  const attr = xmlNodeAttr(root) as Record<string, string>
 
-  const packageAttr = xmlNodeAttr(xmlNode(root, "adtcore:packageRef")) || {}
+  const packageAttr = (xmlNodeAttr(asXmlNode(xmlNode(root, "adtcore:packageRef"))) || {}) as Record<string, string>
 
   const metaData: DataElementMetaData = {
     name: attr["adtcore:name"],
@@ -501,7 +501,7 @@ export async function getDataElementProperties(
     packageUri: packageAttr["adtcore:uri"]
   }
 
-  const dtel = xmlNode(root, "dtel:dataElement")
+  const dtel = xmlNode(root, "dtel:dataElement") as Record<string, any>
 
   const properties: DataElementProperties = {
     typeName: dtel["dtel:typeName"] || "",

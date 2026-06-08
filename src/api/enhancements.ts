@@ -1,7 +1,7 @@
 import { AdtHTTP, HttpClientResponse } from "../AdtHTTP"
 import { ADTClient } from "../AdtClient"
 import { AbapObjectStructure } from "./objectstructure"
-import { fullParse, xmlArray, xmlNode, xmlNodeAttr } from "../utilities"
+import { XmlNode, fullParse, xmlArray, xmlNode, xmlNodeAttr } from "../utilities"
 
 /**
  * A single enhancement plugin element within an enhancement implementation.
@@ -75,7 +75,7 @@ function parsePosition(
 ): EnhancementElement["position"] | undefined {
   if (!posNode) return undefined
   const attrs = xmlNodeAttr(posNode)
-  const posUri: string = attrs["adtcore:uri"] || ""
+  const posUri = String(attrs["adtcore:uri"] || "")
   if (!posUri) return undefined
   const m = posUri.match(/#start=(\d+),(\d+)/)
   if (!m) return undefined
@@ -92,11 +92,11 @@ function parsePosition(
 
 function parsePlugin(plugin: any, includeSource: boolean): EnhancementElement {
   const attrs = xmlNodeAttr(plugin)
-  const uri: string = attrs["enh:uri"] || ""
+  const uri = String(attrs["enh:uri"] || "")
   const id: string = String(attrs["enh:id"] || "").trim()
   // S/4HANA uses enh:full_name (underscore); ECC uses enh:fullname
-  const fullname: string = attrs["enh:full_name"] || attrs["enh:fullname"] || ""
-  const mode: string = attrs["enh:mode"] || ""
+  const fullname = String(attrs["enh:full_name"] || attrs["enh:fullname"] || "")
+  const mode = String(attrs["enh:mode"] || "")
   const replacing: boolean =
     attrs["enh:replacing"] === true || attrs["enh:replacing"] === "true"
 
@@ -192,7 +192,7 @@ export async function objectEnhancements(
     response = await h.request(`${sourceMain}/enhancements`, { qs, headers })
   } catch (err: any) {
     // AdtHTTP wraps HTTP 404s through fromError() as AdtErrorException(500)
-    // when the underlying HTTP client (axios) throws on non-2xx responses.
+    // when the underlying HTTP client reports non-2xx responses.
     // We detect 404 both from the err code and from the error message.
     const httpStatus: number = err?.err ?? err?.code ?? 0
     const msg: string = String(err?.message || "")
@@ -223,9 +223,9 @@ export async function objectEnhancements(
 
   const implementations: EnhancementImplementation[] = implNodes.map(impl => {
     const attrs = xmlNodeAttr(impl)
-    const name: string = attrs["adtcore:name"] || ""
-    const type: string = attrs["adtcore:type"] || ""
-    const version: string = attrs["adtcore:version"] || ""
+    const name = String(attrs["adtcore:name"] || "")
+    const type = String(attrs["adtcore:type"] || "")
+    const version = String(attrs["adtcore:version"] || "")
 
     // Each <enh:elements> wrapper contains exactly one <enh:sourceCodePlugin>.
     // There can be multiple <enh:elements> siblings per implementation.
@@ -239,11 +239,11 @@ export async function objectEnhancements(
     const enhObjNode = xmlNode(impl, "enh:enhancedObject")
     let enhancedObject: EnhancementImplementation["enhancedObject"]
     if (enhObjNode) {
-      const eoAttrs = xmlNodeAttr(enhObjNode)
+      const eoAttrs = xmlNodeAttr(enhObjNode as XmlNode)
       enhancedObject = {
-        uri: eoAttrs["adtcore:uri"] || "",
-        type: eoAttrs["adtcore:type"] || "",
-        name: eoAttrs["adtcore:name"] || ""
+        uri: String(eoAttrs["adtcore:uri"] || ""),
+        type: String(eoAttrs["adtcore:type"] || ""),
+        name: String(eoAttrs["adtcore:name"] || "")
       }
     }
 

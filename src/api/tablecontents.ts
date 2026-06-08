@@ -1,6 +1,6 @@
 import { adtException } from "../AdtException";
 import { AdtHTTP } from "../AdtHTTP";
-import { fullParse, toInt, xmlArray, xmlNode, xmlNodeAttr } from "../utilities";
+import { asXmlNode, fullParse, toInt, XmlNode, xmlArray, xmlNode, xmlNodeAttr } from "../utilities";
 import { Link } from "./objectstructure";
 export enum TypeKinds {
     ANY = '~',
@@ -134,22 +134,31 @@ export interface BindingServiceNavigation {
 
 export const parseServiceBinding = (xml: string) => {
     const s = fullParse(xml, { removeNSPrefix: true, parseAttributeValue: false })
-    const attrs = xmlNodeAttr(s.serviceBinding)
+    const serviceBinding = s.serviceBinding as XmlNode
+    const attrs = xmlNodeAttr(serviceBinding)
     for (const key of ["releaseSupported", "published", "repair", "bindingCreated"])
         attrs[key] = !`${attrs[key]}`.match(/false/i)
-    const packageRef = xmlNodeAttr(s.serviceBinding.packageRef)
-    const links = s.serviceBinding.link.map(xmlNodeAttr)
-    const parseService = (name: string) => (service: any) => {
+    const packageRef = xmlNodeAttr(serviceBinding.packageRef as XmlNode)
+    const links = xmlArray(serviceBinding, "link").map(node => {
+        const link = xmlNodeAttr(node as XmlNode)
+        return {
+            href: String(link.href || ""),
+            rel: String(link.rel || ""),
+            type: link.type ? String(link.type) : undefined,
+            title: link.title ? String(link.title) : undefined,
+        }
+    })
+    const parseService = (name: string) => (service: XmlNode) => {
         const { "@_version": version, "@_releaseState": releaseState } = service
-        const serviceDefinition = xmlNodeAttr(service.serviceDefinition)
+        const serviceDefinition = xmlNodeAttr(service.serviceDefinition as XmlNode)
         return { name, version, releaseState, serviceDefinition }
     }
-    const { "@_name": serviceName } = xmlNode(s, "serviceBinding", "services")
-    const services = xmlArray(s, "serviceBinding", "services", "content").map(parseService(serviceName))
-    const parseBinding = (b: any) => ({ ...xmlNodeAttr(b), implementation: { ...xmlNodeAttr(b.implementation) } })
-    const binding = parseBinding(s.serviceBinding.binding)
+    const { "@_name": serviceName } = xmlNode(s, "serviceBinding", "services") as XmlNode
+    const services = xmlArray(s, "serviceBinding", "services", "content").map(parseService(String(serviceName || "")))
+    const parseBinding = (b: XmlNode) => ({ ...xmlNodeAttr(b), implementation: { ...xmlNodeAttr(b.implementation as XmlNode) } })
+    const binding = parseBinding(serviceBinding.binding as XmlNode)
 
-    return { ...attrs, packageRef, links, services, binding } as ServiceBinding
+    return { ...attrs, packageRef, links, services, binding } as unknown as ServiceBinding
 }
 
 export const extractBindingLinks = (binding: ServiceBinding) => {
@@ -200,7 +209,7 @@ export const decodeQueryResult = (original: QueryResult): QueryResult => {
     return { columns, values }
 }
 
-const parseColumn = (raw: any) => {
+const parseColumn = (raw: XmlNode) => {
     const { "@_name": name = "",
         "@_type": type = "",
         "@_description": description,
@@ -208,9 +217,9 @@ const parseColumn = (raw: any) => {
         "@_colType": colType,
         "@_isKeyFigure": isKeyFigure = false,
         "@_length": length = 0,
-    } = raw.metadata
+    } = raw.metadata as XmlNode
     const values = xmlArray(raw, "dataSet", "data")
-    const meta: QueryResultColumn = { name, type, description, keyAttribute, colType, isKeyFigure, length }
+    const meta: QueryResultColumn = { name: String(name), type: type as TypeKinds, description: String(description || ""), keyAttribute: !!keyAttribute, colType: String(colType || ""), isKeyFigure: !!isKeyFigure, length: Number(length) || 0 }
     return { values, meta }
 }
 export function parseQueryResponse(body: string) {
@@ -218,29 +227,36 @@ export function parseQueryResponse(body: string) {
     const fields = xmlArray(raw, "tableData", "columns").map(parseColumn)
     const columns = fields.map(c => c.meta)
     const longest = fields.map(f => f.values).reduce((m, l) => l.length > m.length ? l : m, [])
-    const row = (_: any, i: number) => fields.reduce((r, f) => {
+    const row = (_: unknown, i: number) => fields.reduce((r, f) => {
         return { ...r, [f.meta.name]: f.values[i] }
-    }, {} as any)
+    }, {} as Record<string, unknown>)
     const values = longest.map(row)
     return { columns, values }
 }
 
 export const parseBindingDetails = (xml: string) => {
     const s = fullParse(xml, { removeNSPrefix: true, parseAttributeValue: false })
-    const link = xmlNodeAttr(s?.serviceList?.link)
-    const parseCollection = (c: any) => {
-        const name = c["@_name"]
+    const serviceList = s?.serviceList as XmlNode
+    const linkAttrs = xmlNodeAttr(asXmlNode(serviceList?.link))
+    const link: Link = {
+        href: String(linkAttrs.href || ""),
+        rel: String(linkAttrs.rel || ""),
+        type: linkAttrs.type ? String(linkAttrs.type) : undefined,
+        title: linkAttrs.title ? String(linkAttrs.title) : undefined,
+    }
+    const parseCollection = (c: XmlNode) => {
+        const name = String(c["@_name"] || "")
         const navigation = xmlArray(c, "navigation").map(xmlNodeAttr)
         return { name, navigation }
     }
-    const parseService = (s: any) => {
+    const parseService = (s: XmlNode) => {
         const base = xmlNodeAttr(s)
-        const serviceInformation = xmlNodeAttr(s.serviceInformation)
+        const serviceInformation = xmlNodeAttr(s.serviceInformation as XmlNode) as Record<string, any>
         serviceInformation.collection = xmlArray(s, "serviceInformation", "collection").map(parseCollection)
         return ({ ...base, serviceInformation })
     }
     const services = xmlArray(s, "serviceList", "services").map(parseService)
-    return { link, services } as BindingServiceResult
+    return { link, services } as unknown as BindingServiceResult
 }
 
 export const servicePreviewUrl = (service: BindingService, collectionName: string) => {

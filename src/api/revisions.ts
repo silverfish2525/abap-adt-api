@@ -4,6 +4,7 @@ import {
   followUrl,
   fullParse,
   isString,
+  XmlNode,
   xmlArray,
   xmlNode,
   xmlNodeAttr
@@ -47,10 +48,10 @@ const extractVersion = (entry: any) => {
   const ADTTYPE = "application/vnd.sap.adt.transportrequests.v1+xml"
   const base = xmlNode(entry, "atom:link")
   if (Array.isArray(base)) {
-    const vlink = base.find(l => l["@_type"] === ADTTYPE) || base[0]
-    return xmlNode(vlink, "@_adtcore:name") || ""
+    const vlink = (base.find(l => (l as XmlNode)["@_type"] === ADTTYPE) || base[0]) as XmlNode
+    return String(xmlNode(vlink, "@_adtcore:name") || "")
   }
-  else return xmlNode(base, "@_adtcore:name") || ""
+  else return String(xmlNode(base as XmlNode, "@_adtcore:name") || "")
 }
 export async function revisions(
   h: AdtHTTP,
@@ -77,11 +78,11 @@ export async function revisions(
   const raw = fullParse(response.body)
   const versions = xmlArray(raw, "atom:feed", "atom:entry").map(
     (entry: any) => {
-      const uri = xmlNode(entry, "atom:content", "@_src") || ""
+      const uri = String(xmlNode(entry, "atom:content", "@_src") || "")
       const version = extractVersion(entry)
-      const versionTitle = xmlNode(entry, "atom:title") || ""
-      const date = xmlNode(entry, "atom:updated") || ""
-      const author = xmlNode(entry, "atom:author", "atom:name")
+      const versionTitle = String(xmlNode(entry, "atom:title") || "")
+      const date = String(xmlNode(entry, "atom:updated") || "")
+      const author = String(xmlNode(entry, "atom:author", "atom:name") || "")
       const r: Revision = { uri, version, versionTitle, date, author }
       return r
     }

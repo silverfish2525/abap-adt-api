@@ -1,297 +1,343 @@
-import * as t from "io-ts"
+import { z } from "zod"
+import { validateShape } from ".."
 import {
   extractXmlArray,
   fullParse,
   isNumber,
-  mixed,
-  orUndefined,
   toInt,
   typedNodeAttr,
-  xmlArrayType,
   xmlNode
 } from "../utilities"
-import { validateParseResult } from "../AdtException"
 
-const contributorClass = t.type({ name: t.string })
-const link = t.type({
-  "@_href": t.string,
-  "@_rel": t.string,
-  "@_type": t.string,
-  "@_title": t.string
-})
+const xmlArrayLike = <T extends z.ZodTypeAny>(s: T) =>
+  z.union([s, z.array(s), z.undefined()]).transform(v =>
+    v === undefined ? [] : Array.isArray(v) ? v : [v]
+  )
 
-// A	Active
-// R	Read Only
-// E	Error
-// S	SizeLim
-// T	TimeLim
-// C	Close Error
-
-const state = t.type({ "@_value": t.string, "@_text": t.string })
-
-const extendedData = t.type({
-  host: t.string,
-  size: t.number,
-  runtime: t.number,
-  runtimeABAP: t.number,
-  runtimeSystem: t.number,
-  runtimeDatabase: t.number,
-  expiration: t.string,
-  system: t.string,
-  client: t.number,
-  isAggregated: t.boolean,
-  aggregationKind: orUndefined(t.string),
-  objectName: t.string,
-  state: state
-})
-
-const entryAuthor = t.type({ name: t.string, uri: t.string })
-const entry = t.type({
-  author: entryAuthor,
-  content: t.type({
-    "@_type": t.string,
-    "@_src": t.string
-  }),
-  id: t.string,
-  link: xmlArrayType(link),
-  published: t.string,
-  title: t.string,
-  updated: t.string,
-  extendedData: extendedData,
-  "@_lang": t.string
-})
-
-const feed = t.type({
-  author: contributorClass,
-  contributor: contributorClass,
-  title: t.string,
-  updated: t.string,
-  entry: xmlArrayType(entry)
-})
-const traceResults = t.type({ feed: feed })
-
-const time = t.type({
-  "@_time": t.number,
-  "@_percentage": t.number
-})
-
-const baseLink = t.type({
-  "@_rel": t.string,
-  "@_href": t.string
-})
-
-const calledProgram = t.type({ "@_context": t.string })
-
-const callingProgram = mixed(
-  {
-    "@_context": t.string,
-    "@_byteCodeOffset": t.number
-  },
-  {
-    "@_uri": t.string,
-    "@_type": t.string,
-    "@_name": t.string,
-    "@_packageName": t.string,
-    "@_objectReferenceQuery": t.string
-  }
-)
-
-const hlentry = mixed(
-  {
-    calledProgram: calledProgram,
-    grossTime: time,
-    traceEventNetTime: time,
-    proceduralNetTime: time,
-    "@_topDownIndex": t.number,
-    "@_index": t.number,
-    "@_hitCount": t.number,
-    "@_recursionDepth": t.number,
-    "@_description": t.string
-  },
-  {
-    callingProgram: callingProgram,
-    "@_stackCount": t.number,
-    "@_proceduralEntryAnchor": t.number,
-    "@_dbAccessAnchor": t.number
-  }
-)
-
-const Hitlist = t.type({
-  link: baseLink,
-  entry: xmlArrayType(hlentry)
-})
-
-const HitListResponse = t.type({ hitlist: Hitlist })
-///
-
-const accessTime = t.type({
-  "@_total": t.number,
-  "@_applicationServer": t.number,
-  "@_database": t.number,
-  "@_ratioOfTraceTotal": t.number
-})
-
-const dBAccess = mixed(
-  {
-    accessTime: accessTime,
-    "@_index": t.number,
-    "@_tableName": t.string,
-    "@_statement": t.string,
-    "@_type": t.union([
-      t.literal("EXEC SQL"),
-      t.literal("OpenSQL"),
-      t.literal("")
-    ]),
-    "@_totalCount": t.number,
-    "@_bufferedCount": t.number
-  },
-  {
-    callingProgram: callingProgram
-  }
-)
-
-const dBAccesses = t.type({
-  link: baseLink,
-  dbAccess: xmlArrayType(dBAccess),
-  tables: t.union([
-    t.type({
-      table: xmlArrayType(
-        t.type({
-          "@_name": t.string,
-          "@_type": t.string,
-          "@_description": t.string,
-          "@_bufferMode": t.string,
-          "@_storageType": t.string,
-          "@_package": t.string
+const StrictOptionalString = z.string().optional()
+const StrictOptionalNumber = z.number().optional()
+const StrictOptionalBoolean = z.boolean().optional()
+const noPresentUndefined =
+  (keys: string[], kind: "string" | "number" | "boolean") =>
+  (value: Record<string, unknown>, ctx: z.RefinementCtx) => {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(value, key) && value[key] === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `expected ${kind}`
         })
-      )
-    }),
-    t.literal("")
-  ]),
-  "@_totalDbTime": t.number
-})
-
-const traceDBAccesResponse = t.type({ dbAccesses: dBAccesses })
-///
-const statement = mixed(
-  {
-    callingProgram: callingProgram,
-    grossTime: time,
-    traceEventNetTime: time,
-    proceduralNetTime: time,
-    "@_index": t.number,
-    "@_id": t.number,
-    "@_description": t.string,
-    "@_hitCount": t.number,
-    "@_hasDetailSubnodes": t.boolean,
-    "@_hasProcedureLikeSubnodes": t.boolean,
-    "@_callerId": t.number,
-    "@_callLevel": t.number,
-    "@_subnodeCount": t.number,
-    "@_directSubnodeCount": t.number,
-    "@_directSubnodeCountProcedureLike": t.number,
-    "@_hitlistAnchor": t.number
-  },
-  {
-    "@_isProcedureLike": t.boolean,
-    "@_isProceduralUnit": t.boolean,
-    "@_isAutoDrillDowned": t.boolean,
-    "@_calltreeAnchor": t.number,
-    "@_moduleHitlistAnchor": t.number
+      }
+    }
   }
-)
 
-const traceStatementResponse = t.type({
-  statements: t.type({
-    link: baseLink,
-    statement: xmlArrayType(statement),
-    "@_withDetails": t.boolean,
-    "@_withSysEvents": t.boolean,
-    "@_count": t.union([t.number, t.string])
+const ContributorClass = z.object({ name: z.string() })
+type ContributorClass = z.infer<typeof ContributorClass>
+
+const XmlLink = z.object({
+  "@_href": z.string(),
+  "@_rel": z.string(),
+  "@_type": z.string(),
+  "@_title": z.string()
+})
+type XmlLink = z.infer<typeof XmlLink>
+
+const XmlState = z.object({ "@_value": z.string(), "@_text": z.string() })
+type XmlState = z.infer<typeof XmlState>
+
+const ExtendedDataRaw = z
+  .object({
+    host: z.string(),
+    size: z.number(),
+    runtime: z.number(),
+    runtimeABAP: z.number(),
+    runtimeSystem: z.number(),
+    runtimeDatabase: z.number(),
+    expiration: z.string(),
+    system: z.string(),
+    client: z.number(),
+    isAggregated: z.boolean(),
+    aggregationKind: StrictOptionalString,
+    objectName: z.string(),
+    state: XmlState
   })
+  .superRefine(noPresentUndefined(["aggregationKind"], "string"))
+type ExtendedDataRaw = z.infer<typeof ExtendedDataRaw>
+
+const EntryAuthor = z.object({ name: z.string(), uri: z.string() })
+type EntryAuthor = z.infer<typeof EntryAuthor>
+
+const FeedEntryRaw = z.object({
+  author: EntryAuthor,
+  content: z.object({ "@_type": z.string(), "@_src": z.string() }),
+  id: z.string(),
+  link: xmlArrayLike(XmlLink),
+  published: z.string(),
+  title: z.string(),
+  updated: z.string(),
+  extendedData: ExtendedDataRaw,
+  "@_lang": z.string()
 })
+type FeedEntryRaw = z.infer<typeof FeedEntryRaw>
 
-///
-
-const author = t.type({
-  name: t.string,
-  uri: t.string,
-  "@_role": t.string
+const FeedRaw = z.object({
+  author: ContributorClass,
+  contributor: ContributorClass,
+  title: z.string(),
+  updated: z.string(),
+  entry: xmlArrayLike(FeedEntryRaw)
 })
+type FeedRaw = z.infer<typeof FeedRaw>
 
-const client = t.partial({
-  "#text": orUndefined(t.number),
-  "@_role": t.string
+const TraceResultsRaw = z.object({ feed: FeedRaw })
+type TraceResultsRaw = z.infer<typeof TraceResultsRaw>
+
+const BaseLink = z.object({ "@_rel": z.string(), "@_href": z.string() })
+type BaseLink = z.infer<typeof BaseLink>
+
+const XmlTime = z.object({
+  "@_time": z.number(),
+  "@_percentage": z.number()
 })
+type XmlTime = z.infer<typeof XmlTime>
 
-const executions = t.type({
-  "@_maximal": t.number,
-  "@_completed": t.number
-})
+const CalledProgramRaw = z.object({ "@_context": z.string() })
+type CalledProgramRaw = z.infer<typeof CalledProgramRaw>
 
-const rawProcessTypes = t.union([
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/any"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/http"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/dialog"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/batch"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/processtypes/rfc"),
-  t.literal(
-    "/sap/bc/adt/runtime/traces/abaptraces/processtypes/sharedobjectsarea"
+const CallingProgramRaw = z
+  .object({
+    "@_context": z.string(),
+    "@_byteCodeOffset": z.number(),
+    "@_uri": StrictOptionalString,
+    "@_type": StrictOptionalString,
+    "@_name": StrictOptionalString,
+    "@_packageName": StrictOptionalString,
+    "@_objectReferenceQuery": StrictOptionalString
+  })
+  .superRefine(
+    noPresentUndefined(
+      ["@_uri", "@_type", "@_name", "@_packageName", "@_objectReferenceQuery"],
+      "string"
+    )
   )
+type CallingProgramRaw = z.infer<typeof CallingProgramRaw>
+
+const HitListEntryRaw = z
+  .object({
+    calledProgram: CalledProgramRaw,
+    grossTime: XmlTime,
+    traceEventNetTime: XmlTime,
+    proceduralNetTime: XmlTime,
+    "@_topDownIndex": z.number(),
+    "@_index": z.number(),
+    "@_hitCount": z.number(),
+    "@_recursionDepth": z.number(),
+    "@_description": z.string(),
+    callingProgram: CallingProgramRaw.optional(),
+    "@_stackCount": StrictOptionalNumber,
+    "@_proceduralEntryAnchor": StrictOptionalNumber,
+    "@_dbAccessAnchor": StrictOptionalNumber
+  })
+  .superRefine(
+    noPresentUndefined(
+      ["@_stackCount", "@_proceduralEntryAnchor", "@_dbAccessAnchor"],
+      "number"
+    )
+  )
+type HitListEntryRaw = z.infer<typeof HitListEntryRaw>
+
+const HitlistRaw = z.object({
+  link: BaseLink,
+  entry: xmlArrayLike(HitListEntryRaw)
+})
+type HitlistRaw = z.infer<typeof HitlistRaw>
+
+const HitListResponseRaw = z.object({ hitlist: HitlistRaw })
+type HitListResponseRaw = z.infer<typeof HitListResponseRaw>
+
+const AccessTimeRaw = z.object({
+  "@_total": z.number(),
+  "@_applicationServer": z.number(),
+  "@_database": z.number(),
+  "@_ratioOfTraceTotal": z.number()
+})
+type AccessTimeRaw = z.infer<typeof AccessTimeRaw>
+
+const DbAccessTypeLiteral = z.union([
+  z.literal("EXEC SQL"),
+  z.literal("OpenSQL"),
+  z.literal("")
 ])
 
-const rawObjectTypes = t.union([
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/any"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/url"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/transaction"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/report"),
-  t.literal("/sap/bc/adt/runtime/traces/abaptraces/objecttypes/functionmodule"),
-  t.literal(
-    "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/sharedobjectarea"
-  )
-])
-type RawObjectTypes = t.TypeOf<typeof rawObjectTypes>
-type RawProcessTypes = t.TypeOf<typeof rawProcessTypes>
-const traceListextendedData = t.type({
-  host: t.string,
-  requestIndex: t.number,
-  client: xmlArrayType(client),
-  description: t.string,
-  isAggregated: t.boolean,
-  expires: t.string,
-  processType: t.type({ "@_processTypeId": rawProcessTypes }),
-  object: t.type({ "@_objectTypeId": rawObjectTypes }),
-  executions: executions
+const DbAccessRaw = z.object({
+  accessTime: AccessTimeRaw,
+  "@_index": z.number(),
+  "@_tableName": z.string(),
+  "@_statement": z.string(),
+  "@_type": DbAccessTypeLiteral,
+  "@_totalCount": z.number(),
+  "@_bufferedCount": z.number(),
+  callingProgram: CallingProgramRaw.optional()
 })
+type DbAccessRaw = z.infer<typeof DbAccessRaw>
 
-const traceListEntry = mixed(
-  {
-    id: t.string,
-    author: xmlArrayType(author),
-    content: t.type({
-      "@_type": t.string,
-      "@_src": t.string
-    }),
-    published: t.string,
-    title: t.string,
-    updated: t.string,
-    extendedData: traceListextendedData,
-    "@_lang": t.string
-  },
-  {
-    link: xmlArrayType(link)
-  }
-)
-const tlFeed = t.type({
-  contributor: t.type({
-    name: t.string,
-    "@_role": t.string
+const DbTableRaw = z.object({
+  "@_name": z.string(),
+  "@_type": z.string(),
+  "@_description": z.string(),
+  "@_bufferMode": z.string(),
+  "@_storageType": z.string(),
+  "@_package": z.string()
+})
+type DbTableRaw = z.infer<typeof DbTableRaw>
+
+const DbAccessesRaw = z.union([
+  z.object({
+    link: BaseLink,
+    dbAccess: xmlArrayLike(DbAccessRaw),
+    tables: z.literal(""),
+    "@_totalDbTime": z.number()
   }),
-  title: t.string,
-  updated: t.string,
-  entry: xmlArrayType(traceListEntry)
+  z.object({
+    link: BaseLink,
+    dbAccess: xmlArrayLike(DbAccessRaw),
+    tables: z.object({ table: xmlArrayLike(DbTableRaw) }),
+    "@_totalDbTime": z.number()
+  })
+])
+type DbAccessesRaw = z.infer<typeof DbAccessesRaw>
+
+const TraceDbAccessResponseRaw = z.object({ dbAccesses: DbAccessesRaw })
+type TraceDbAccessResponseRaw = z.infer<typeof TraceDbAccessResponseRaw>
+
+const StatementRaw = z
+  .object({
+    callingProgram: CallingProgramRaw,
+    grossTime: XmlTime,
+    traceEventNetTime: XmlTime,
+    proceduralNetTime: XmlTime,
+    "@_index": z.number(),
+    "@_id": z.number(),
+    "@_description": z.string(),
+    "@_hitCount": z.number(),
+    "@_hasDetailSubnodes": z.boolean(),
+    "@_hasProcedureLikeSubnodes": z.boolean(),
+    "@_callerId": z.number(),
+    "@_callLevel": z.number(),
+    "@_subnodeCount": z.number(),
+    "@_directSubnodeCount": z.number(),
+    "@_directSubnodeCountProcedureLike": z.number(),
+    "@_hitlistAnchor": z.number(),
+    "@_isProcedureLike": StrictOptionalBoolean,
+    "@_isProceduralUnit": StrictOptionalBoolean,
+    "@_isAutoDrillDowned": StrictOptionalBoolean,
+    "@_calltreeAnchor": StrictOptionalNumber,
+    "@_moduleHitlistAnchor": StrictOptionalNumber
+  })
+  .superRefine(
+    noPresentUndefined(
+      ["@_isProcedureLike", "@_isProceduralUnit", "@_isAutoDrillDowned"],
+      "boolean"
+    )
+  )
+  .superRefine(
+    noPresentUndefined(["@_calltreeAnchor", "@_moduleHitlistAnchor"], "number")
+  )
+type StatementRaw = z.infer<typeof StatementRaw>
+
+const StatementsRaw = z.object({
+  link: BaseLink,
+  statement: xmlArrayLike(StatementRaw),
+  "@_withDetails": z.boolean(),
+  "@_withSysEvents": z.boolean(),
+  "@_count": z.union([z.number(), z.string()])
 })
-const tracesListRequest = t.type({ feed: tlFeed })
+type StatementsRaw = z.infer<typeof StatementsRaw>
+
+const TraceStatementResponseRaw = z.object({ statements: StatementsRaw })
+type TraceStatementResponseRaw = z.infer<typeof TraceStatementResponseRaw>
+
+const AuthorRaw = z.object({
+  name: z.string(),
+  uri: z.string(),
+  "@_role": z.string()
+})
+type AuthorRaw = z.infer<typeof AuthorRaw>
+
+const ClientRaw = z
+  .object({
+    "#text": StrictOptionalNumber,
+    "@_role": StrictOptionalString
+  })
+  .superRefine(noPresentUndefined(["#text"], "number"))
+  .superRefine(noPresentUndefined(["@_role"], "string"))
+type ClientRaw = z.infer<typeof ClientRaw>
+
+const ExecutionsRaw = z.object({
+  "@_maximal": z.number(),
+  "@_completed": z.number()
+})
+type ExecutionsRaw = z.infer<typeof ExecutionsRaw>
+
+const RAW_PROCESS_TYPES = [
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/any",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/http",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/dialog",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/batch",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/rfc",
+  "/sap/bc/adt/runtime/traces/abaptraces/processtypes/sharedobjectsarea"
+] as const
+export type RawProcessTypes = (typeof RAW_PROCESS_TYPES)[number]
+
+const RAW_OBJECT_TYPES = [
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/any",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/url",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/transaction",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/report",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/functionmodule",
+  "/sap/bc/adt/runtime/traces/abaptraces/objecttypes/sharedobjectarea"
+] as const
+export type RawObjectTypes = (typeof RAW_OBJECT_TYPES)[number]
+
+const RawProcessTypesSchema = z.union(RAW_PROCESS_TYPES.map(v => z.literal(v)) as [z.ZodLiteral<RawProcessTypes>, ...z.ZodLiteral<RawProcessTypes>[]])
+const RawObjectTypesSchema = z.union(RAW_OBJECT_TYPES.map(v => z.literal(v)) as [z.ZodLiteral<RawObjectTypes>, ...z.ZodLiteral<RawObjectTypes>[]])
+
+const TraceListExtendedDataRaw = z.object({
+  host: z.string(),
+  requestIndex: z.number(),
+  client: xmlArrayLike(ClientRaw),
+  description: z.string(),
+  isAggregated: z.boolean(),
+  expires: z.string(),
+  processType: z.object({ "@_processTypeId": RawProcessTypesSchema }),
+  object: z.object({ "@_objectTypeId": RawObjectTypesSchema }),
+  executions: ExecutionsRaw
+})
+type TraceListExtendedDataRaw = z.infer<typeof TraceListExtendedDataRaw>
+
+const TraceListEntryRaw = z.object({
+  id: z.string(),
+  author: xmlArrayLike(AuthorRaw),
+  content: z.object({ "@_type": z.string(), "@_src": z.string() }),
+  published: z.string(),
+  title: z.string(),
+  updated: z.string(),
+  extendedData: TraceListExtendedDataRaw,
+  "@_lang": z.string(),
+  link: xmlArrayLike(XmlLink).optional()
+})
+type TraceListEntryRaw = z.infer<typeof TraceListEntryRaw>
+
+const TlFeedRaw = z.object({
+  contributor: z.object({ name: z.string(), "@_role": z.string() }),
+  title: z.string(),
+  updated: z.string(),
+  entry: xmlArrayLike(TraceListEntryRaw)
+})
+type TlFeedRaw = z.infer<typeof TlFeedRaw>
+
+const TracesListRequestRaw = z.object({ feed: TlFeedRaw })
+type TracesListRequestRaw = z.infer<typeof TracesListRequestRaw>
 
 export interface TraceResults {
   author: string
@@ -379,8 +425,6 @@ export interface TraceTime {
   percentage: number
 }
 
-///
-
 export interface TraceDBAccessResponse {
   parentLink: string
   dbaccesses: Dbaccess[]
@@ -415,8 +459,6 @@ export interface Table {
   package: string
 }
 
-///
-
 export interface TraceStatement {
   index: number
   id: number
@@ -448,14 +490,14 @@ export interface TraceStatementResponse {
   parentLink: string
   statements: TraceStatement[]
 }
-///
+
 export type TraceStatementOptions = Partial<{
   id: number
   withDetails: boolean
   autoDrillDownThreshold: number
   withSystemEvents: boolean
 }>
-///
+
 export interface TraceRequestAuthor {
   name: string
   role: string
@@ -503,7 +545,6 @@ export interface TraceRequestList {
   requests: TraceRequest[]
 }
 
-///
 export interface TraceParameters {
   allMiscAbapStatements: boolean
   allProceduralUnits: boolean
@@ -519,7 +560,6 @@ export interface TraceParameters {
   maxSizeForTraceFile: number
   maxTimeForTracing: number
 }
-///
 
 export type TracedProcessType =
   | "HTTP"
@@ -616,9 +656,6 @@ export const traceProcessObjects: Record<
 }
 
 export interface TracesCreationConfig {
-  /**
-   * server name, use * for all servers
-   */
   server?: string
   description: string
   traceUser: string
@@ -631,7 +668,7 @@ export interface TracesCreationConfig {
 }
 
 const parseRawTrace = (x: unknown) =>
-  validateParseResult(traceResults.decode(x)).feed
+  validateShape(x, TraceResultsRaw, "TraceResultsRaw").feed
 
 export const parseTraceResults = (xml: string): TraceResults => {
   const raw = parseRawTrace(fullParse(xml, { removeNSPrefix: true }))
@@ -672,13 +709,15 @@ export const parseTraceResults = (xml: string): TraceResults => {
     contributor: { name: contributor },
     title
   } = raw
-  const updated = new Date(xmlNode(raw, "updated"))
+  const updated = new Date(String(xmlNode(raw, "updated") || ""))
   return { author, contributor, title, updated, runs }
 }
 
 export const parseTraceHitList = (xml: string): TraceHitList => {
-  const raw = validateParseResult(
-    HitListResponse.decode(fullParse(xml, { removeNSPrefix: true }))
+  const raw = validateShape(
+    fullParse(xml, { removeNSPrefix: true }),
+    HitListResponseRaw,
+    "HitListResponseRaw"
   ).hitlist
   const parentLink = raw.link["@_href"]
   const entries = extractXmlArray(raw.entry).map(e => {
@@ -704,8 +743,11 @@ export const parseTraceHitList = (xml: string): TraceHitList => {
 
 export const parseTraceDbAccess = (xml: string): TraceDBAccessResponse => {
   const toParse = fullParse(xml, { removeNSPrefix: true })
-  const parsed = traceDBAccesResponse.decode(toParse)
-  const raw = validateParseResult(parsed).dbAccesses
+  const raw = validateShape(
+    toParse,
+    TraceDbAccessResponseRaw,
+    "TraceDbAccessResponseRaw"
+  ).dbAccesses
   const parentLink = raw.link["@_href"]
   const dbaccesses = extractXmlArray(raw.dbAccess).map(a => {
     const callingProgram = a.callingProgram && typedNodeAttr(a.callingProgram)
@@ -727,8 +769,10 @@ const parseCount = (count: string | number) => {
 }
 
 export const parseTraceStatements = (xml: string) => {
-  const raw = validateParseResult(
-    traceStatementResponse.decode(fullParse(xml, { removeNSPrefix: true }))
+  const raw = validateShape(
+    fullParse(xml, { removeNSPrefix: true }),
+    TraceStatementResponseRaw,
+    "TraceStatementResponseRaw"
   ).statements
 
   const parentLink = raw.link["@_href"]
@@ -751,8 +795,11 @@ export const parseTraceStatements = (xml: string) => {
 }
 
 export const parseTraceRequestList = (xml: string): TraceRequestList => {
-  const raw = tracesListRequest.decode(fullParse(xml, { removeNSPrefix: true }))
-  const parsed = validateParseResult(raw).feed
+  const parsed = validateShape(
+    fullParse(xml, { removeNSPrefix: true }),
+    TracesListRequestRaw,
+    "TracesListRequestRaw"
+  ).feed
   const {
     contributor: { name: contributorName, "@_role": contributorRole },
     title

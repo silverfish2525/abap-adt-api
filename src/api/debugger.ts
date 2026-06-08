@@ -1,6 +1,6 @@
 import { adtException } from ".."
 import { AdtHTTP } from "../AdtHTTP"
-import { encodeEntity, fullParse, isString, numberParseOptions, toInt, xmlArray, xmlNode, xmlNodeAttr } from "../utilities"
+import { XmlNode, encodeEntity, fullParse, isString, numberParseOptions, toInt, xmlArray, xmlNode, xmlNodeAttr } from "../utilities"
 import { parseUri, UriParts } from "./urlparser"
 
 export type DebuggingMode = "user" | "terminal"
@@ -245,10 +245,10 @@ export const debugMetaIsComplex = (m: DebugMetaType): m is DebugMetaTypeComplex 
 const parseStep = (body: string): DebugStep => {
     const raw = fullParse(body, { removeNSPrefix: true })
     checkException(raw)
-    const attrs = xmlNodeAttr(raw.step)
-    const settings = xmlNodeAttr(raw?.step?.settings)
-    const actions = xmlArray(raw, "step", "actions", "action").map(xmlNodeAttr)
-    return { ...attrs, actions, settings }
+    const attrs = xmlNodeAttr(raw.step as XmlNode)
+    const settings = xmlNodeAttr((raw.step as XmlNode)?.settings as XmlNode)
+    const actions = xmlArray(raw, "step", "actions", "action").map(xmlNodeAttr) as unknown as DebugAction[]
+    return { ...attrs, actions, settings } as unknown as DebugStep
 }
 
 const convertVariable = (v: any) => ({
@@ -272,34 +272,34 @@ const parseChildVariables = (body: string): DebugChildVariablesInfo => {
     const hierarchies = xmlArray(raw, "abap", "values", "DATA", "HIERARCHIES", "STPDA_ADT_VARIABLE_HIERARCHY")
     const variables = xmlArray(raw, "abap", "values", "DATA", "VARIABLES", "STPDA_ADT_VARIABLE")
         .map(convertVariable)
-    return { hierarchies, variables } as DebugChildVariablesInfo
+    return { hierarchies, variables } as unknown as DebugChildVariablesInfo
 }
 
 const parseStack = (body: string): DebugStackInfo => {
     const raw = fullParse(body, { removeNSPrefix: true })
     const stack = xmlArray(raw, "stack", "stackEntry")
         .map(xmlNodeAttr)
-        .map(x => ({ ...x, uri: parseUri(x.uri) }))
-    const attrs = xmlNodeAttr(raw.stack)
-    return { ...attrs, stack }
+        .map(x => ({ ...x, uri: parseUri(String(x.uri || "")) })) as unknown as DebugStack[]
+    const attrs = xmlNodeAttr(raw.stack as XmlNode)
+    return { ...attrs, stack } as unknown as DebugStackInfo
 }
 
 const parseDebugSettings = (body: string): DebugSettings => {
     const raw = fullParse(body, { removeNSPrefix: true })
-    return xmlNodeAttr(raw.settings)
+    return xmlNodeAttr(raw.settings as XmlNode) as unknown as DebugSettings
 }
 
 const parseAttach = (body: string): DebugAttach => {
     const raw = fullParse(body, { removeNSPrefix: true })
-    const attrs = xmlNodeAttr(raw.attach)
+    const attrs = xmlNodeAttr(raw.attach as XmlNode)
     const reachedBreakpoints = xmlArray(
         raw,
         "attach",
         "reachedBreakpoints",
         "breakpoint"
-    ).map(xmlNodeAttr)
-    const actions = xmlArray(raw, "attach", "actions", "action").map(xmlNodeAttr)
-    return { ...attrs, actions, reachedBreakpoints }
+    ).map(xmlNodeAttr) as unknown as DebugReachedBreakpoint[]
+    const actions = xmlArray(raw, "attach", "actions", "action").map(xmlNodeAttr) as unknown as DebugAction[]
+    return { ...attrs, actions, reachedBreakpoints } as unknown as DebugAttach
 }
 
 const parseBreakpoints = (body: string): (DebugBreakpoint | DebugBreakpointError)[] => {
@@ -307,9 +307,9 @@ const parseBreakpoints = (body: string): (DebugBreakpoint | DebugBreakpointError
     return xmlArray(raw, "breakpoints", "breakpoint")
         .map(xmlNodeAttr)
         .map(x => {
-            if (x.uri) return { ...x, uri: parseUri(x.uri) }
+            if (x.uri) return { ...x, uri: parseUri(String(x.uri)) }
             return x
-        })
+        }) as unknown as (DebugBreakpoint | DebugBreakpointError)[]
 }
 
 const parseDebugError = (raw: any): DebugListenerError | undefined => {
@@ -356,8 +356,8 @@ const parseDebugListeners = (
     const raw = fullParse(body, { removeNSPrefix: true })
     const err = parseDebugError(raw)
     if (err) return err
-    const debug = xmlNode(raw, "abap", "values", "DATA", "STPDA_DEBUGGEE")
-    return { ...debug, URI: parseUri(debug.URI) }
+    const debug = xmlNode(raw, "abap", "values", "DATA", "STPDA_DEBUGGEE") as XmlNode
+    return { ...debug, URI: parseUri(String(debug.URI || "")) } as Debuggee
 }
 
 export async function debuggerListeners(

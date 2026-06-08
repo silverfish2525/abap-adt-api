@@ -1,11 +1,13 @@
 import { adtException, ValidateObjectUrl } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
 import {
+  asXmlNode,
   btoa,
   fullParse,
   parse,
   parts,
   toInt,
+  XmlNode,
   xmlArray,
   xmlNode,
   xmlNodeAttr
@@ -43,13 +45,13 @@ export async function syntaxCheckTypes(h: AdtHTTP) {
     raw,
     "chkrun:checkReporters",
     "chkrun:reporter"
-  ).reduce((acc: Map<string, string[]>, cur: any) => {
-    acc.set(cur["@_chkrun:name"], xmlArray(cur, "chkrun:supportedType"))
+  ).reduce((acc: Map<string, string[]>, cur: XmlNode) => {
+    acc.set(String(cur["@_chkrun:name"] || ""), xmlArray(cur, "chkrun:supportedType"))
     return acc
   }, new Map<string, string[]>())
   return reporters
 }
-export function parseCheckResults(raw: any) {
+export function parseCheckResults(raw: XmlNode) {
   const messages = [] as SyntaxCheckResult[]
   xmlArray(
     raw,
@@ -57,14 +59,14 @@ export function parseCheckResults(raw: any) {
     "chkrun:checkReport",
     "chkrun:checkMessageList",
     "chkrun:checkMessage"
-  ).forEach((m: any) => {
-    const rawUri = m["@_chkrun:uri"] || ""
-    let message = {
+  ).forEach((m: XmlNode) => {
+    const rawUri = String(m["@_chkrun:uri"] || "")
+    let message: SyntaxCheckResult = {
       uri: rawUri,
       line: 0,
       offset: 0,
-      severity: m["@_chkrun:type"],
-      text: m["@_chkrun:shortText"]
+      severity: String(m["@_chkrun:type"] || ""),
+      text: String(m["@_chkrun:shortText"] || "")
     }
     const matches = rawUri.match(/([^#]+)#start=([\d]+),([\d]+)/)
     if (matches) {
@@ -170,8 +172,8 @@ export async function codeCompletion(
     "DATA",
     "SCC_COMPLETION"
   )
-    .filter((p: any) => p.IDENTIFIER && p.IDENTIFIER !== "@end")
-    .map((p: any) => ({
+    .filter((p: XmlNode) => p.IDENTIFIER && p.IDENTIFIER !== "@end")
+    .map((p: XmlNode) => ({
       ...p,
       IDENTIFIER: p.IDENTIFIER
     })) as CompletionProposal[]
@@ -196,9 +198,10 @@ export async function codeCompletionFull(
   return response.body
 }
 
-function extractDocLink(raw: any): string {
-  const link =
+function extractDocLink(raw: XmlNode): string {
+  const link = String(
     xmlNode(raw, "abapsource:elementInfo", "atom:link", "@_href") || ""
+  )
   return link.replace(/\w+:\/\/[^\/]*/, "")
 }
 
@@ -218,7 +221,7 @@ export async function codeCompletionElement(
   )
   const raw = fullParse(response.body)
   if (!xmlNode(raw, "abapsource:elementInfo")) return response.body
-  const elinfo = xmlNodeAttr(xmlNode(raw, "abapsource:elementInfo"))
+  const elinfo = xmlNodeAttr(asXmlNode(xmlNode(raw, "abapsource:elementInfo")))
   const doc =
     xmlNode(
       raw,
@@ -232,23 +235,23 @@ export async function codeCompletionElement(
     raw,
     "abapsource:elementInfo",
     "abapsource:elementInfo"
-  ).map((c: any) => {
+  ).map((c: XmlNode) => {
     return {
       ...xmlNodeAttr(c),
       entries: xmlArray(c, "abapsource:properties", "abapsource:entry").map(
-        (e: any) => {
+        (e: XmlNode) => {
           return {
             value: e["#text"],
             key: e["@_abapsource:key"]
           }
         }
       )
-    }
+    } as unknown as CompletionElementInfo["components"][number]
   })
   return {
-    name: elinfo["adtcore:name"],
-    type: elinfo["adtcore:type"],
-    doc,
+    name: String(elinfo["adtcore:name"] || ""),
+    type: String(elinfo["adtcore:type"] || ""),
+    doc: String(doc || ""),
     href,
     components
   }
@@ -277,12 +280,12 @@ export async function findDefinition(
     body
   })
   const raw = fullParse(response.body)
-  const rawLink = xmlNode(raw, "adtcore:objectReference", "@_adtcore:uri") || ""
+  const rawLink = String(xmlNode(raw, "adtcore:objectReference", "@_adtcore:uri") || "")
   const match = rawLink.match(/([^#]+)#start=(\d+),(\d+)/)
   return {
     url: (match && match[1]) || rawLink,
-    line: toInt(match && match[2]),
-    column: toInt(match && match[3])
+    line: toInt((match && match[2]) || undefined),
+    column: toInt((match && match[3]) || undefined)
   } as DefinitionLocation
 }
 
@@ -315,12 +318,12 @@ export async function usageReferences(
     "usageReferences:referencedObjects",
     "usageReferences:referencedObject"
   )
-  const references = rawreferences.map((r: any) => {
+  const references = rawreferences.map((r: XmlNode) => {
     const reference = {
       ...xmlNodeAttr(r),
-      ...xmlNodeAttr(xmlNode(r, "usageReferences:adtObject") || {}),
+      ...xmlNodeAttr(asXmlNode(xmlNode(r, "usageReferences:adtObject"))),
       packageRef: xmlNodeAttr(
-        xmlNode(r, "usageReferences:adtObject", "adtcore:packageRef") || {}
+        asXmlNode(xmlNode(r, "usageReferences:adtObject", "adtcore:packageRef"))
       ),
       objectIdentifier: r.objectIdentifier || ""
     } as UsageReference
@@ -417,15 +420,15 @@ export async function usageReferenceSnippets(
     "usageReferences:usageSnippetResult",
     "usageReferences:codeSnippetObjects",
     "usageReferences:codeSnippetObject"
-  ).map((o: any) => {
+  ).map((o: XmlNode) => {
     const snippets = xmlArray(
       o,
       "usageReferences:codeSnippets",
       "usageReferences:codeSnippet"
-    ).map((s: any) => {
+    ).map((s: XmlNode) => {
       const parms = xmlNodeAttr(s)
 
-      const uri = splitReferenceUri(parms.uri, parms.matches)
+      const uri = splitReferenceUri(String(parms.uri || ""), String(parms.matches || ""))
 
       return {
         uri,
@@ -450,13 +453,31 @@ export interface ClassComponent {
   level?: string
   readOnly?: boolean
 }
-const parseElement = (e: any): ClassComponent => {
-  const attrs = xmlNodeAttr(e)
-  const links = xmlArray(e, "atom:link").map(xmlNodeAttr)
+const parseElement = (e: XmlNode): ClassComponent => {
+  const attrs = xmlNodeAttr(e) as Record<string, any>
+  const links = xmlArray(e, "atom:link").map(node => {
+    const link = xmlNodeAttr(node as XmlNode)
+    return {
+      href: String(link.href || ""),
+      rel: String(link.rel || ""),
+      type: link.type ? String(link.type) : undefined,
+      title: link.title ? String(link.title) : undefined,
+    }
+  })
   const components = xmlArray(e, "abapsource:objectStructureElement").map(
     parseElement
   )
-  return { ...attrs, links, components }
+  return {
+    "adtcore:name": String(attrs["adtcore:name"] || ""),
+    "adtcore:type": String(attrs["adtcore:type"] || ""),
+    links,
+    visibility: String(attrs.visibility || ""),
+    "xml:base": String(attrs["xml:base"] || ""),
+    components,
+    constant: attrs.constant === true || attrs.constant === "true",
+    level: attrs.level ? String(attrs.level) : undefined,
+    readOnly: attrs.readOnly === true || attrs.readOnly === "true",
+  }
 }
 
 export async function classComponents(h: AdtHTTP, url: string) {
@@ -466,7 +487,7 @@ export async function classComponents(h: AdtHTTP, url: string) {
   const headers = { "Content-Type": "application/*" }
   const response = await h.request(uri, { qs, headers })
   const raw = fullParse(response.body)
-  const header = parseElement(xmlNode(raw, "abapsource:objectStructureElement"))
+  const header = parseElement(xmlNode(raw, "abapsource:objectStructureElement") as XmlNode)
   return header as ClassComponent
 }
 
@@ -519,8 +540,17 @@ export async function prettyPrinterSetting(h: AdtHTTP) {
     "/sap/bc/adt/abapsource/prettyprinter/settings"
   )
   const raw = fullParse(response.body)
-  const settings = xmlNodeAttr(raw["abapformatter:PrettyPrinterSettings"])
-  return settings as PrettyPrinterSettings
+  const settings = xmlNodeAttr(
+    raw["abapformatter:PrettyPrinterSettings"] as XmlNode
+  )
+  return {
+    "abapformatter:indentation":
+      settings["abapformatter:indentation"] === true ||
+      settings["abapformatter:indentation"] === "true",
+    "abapformatter:style": String(
+      settings["abapformatter:style"] || "none"
+    ) as PrettyPrinterStyle,
+  }
 }
 
 export async function setPrettyPrinterSetting(
@@ -584,13 +614,13 @@ export async function typeHierarchy(
   const raw = fullParse(response.body)
   const hierarchy = xmlArray(raw, "hierarchy:info", "entries", "entry").map(
     he => {
-      const rawh = xmlNodeAttr(he)
+      const rawh = xmlNodeAttr(he) as Record<string, any>
       const [uri, srcline, character] = parts(
         rawh["adtcore:uri"],
         /([^#]+)(?:#start=(\d+)(?:,(\d+))?)?/
       )
       const node: HierarchyNode = {
-        hasDefOrImpl: rawh.hasDefOrImpl,
+        hasDefOrImpl: !!rawh.hasDefOrImpl,
         uri,
         line: toInt(srcline),
         character: toInt(character),
