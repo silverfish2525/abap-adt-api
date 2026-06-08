@@ -32,6 +32,7 @@ export interface ActivationResultMessage {
   href: string
   forceSupported: boolean
   shortText: string
+  longText?: string
 }
 export interface ActivationResult {
   success: boolean
@@ -130,6 +131,8 @@ export async function activate(
     messages = xmlArray(raw, "chkl:messages", "msg").map((m: any) => {
       const message = xmlNodeAttr(m)
       message.shortText = (m.shortText && m.shortText.txt) || "Syntax error"
+      const lt = m.longText && (m.longText.txt ?? m.longText)
+      if (typeof lt === "string" && lt) message.longText = lt
       return message
     }) as ActivationResultMessage[]
     if (inactive.length > 0) success = false
