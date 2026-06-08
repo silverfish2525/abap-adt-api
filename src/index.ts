@@ -2,7 +2,12 @@ export {
   session_types,
   ClientOptions,
   HttpResponse,
-  HttpClient
+  HttpClient,
+  HttpClientOptions,
+  HttpClientResponse,
+  RequestInterceptor,
+  ResponseInterceptor,
+  InterceptorHandle
 } from "./AdtHTTP"
 export * from "./AdtClient"
 export * from "./AdtException"
