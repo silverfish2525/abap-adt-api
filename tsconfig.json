@@ -3,8 +3,12 @@
     /* Basic Options */
     "target": "es2022",
     "module": "commonjs",
-    "lib": ["es2023"],
-    "types": ["node"],
+    "lib": [
+      "es2023"
+    ],
+    "types": [
+      "node"
+    ],
     "skipLibCheck": true,
     "declaration": true /* Generates corresponding '.d.ts' file. */,
     "declarationMap": true /* Generates a sourcemap for each corresponding '.d.ts' file. */,
@@ -17,10 +21,10 @@
     "esModuleInterop": true /* Enables emit interoperability between CommonJS and ES Modules via creation of namespace objects for all imports. Implies 'allowSyntheticDefaultImports'. */
   },
   "exclude": [
-    "vitest.config.ts",
     "node_modules",
     "build",
     "rfctransportdemo",
-    "tmp"
+    "tmp",
+    "vitest.config.ts"
   ]
 }

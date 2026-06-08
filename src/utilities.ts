@@ -2,7 +2,7 @@ import { XMLParser, strnumOptions, X2jOptions } from "fast-xml-parser"
 export { encode as encodeEntity } from "html-entities"
 import { encode } from "html-entities"
 
-export const isObject = <T extends Object>(x: unknown): x is T =>
+export const isObject = <T extends object>(x: unknown): x is T =>
   !!x && typeof x === "object"
 export const isArray = <T = unknown>(x: unknown): x is T[] => Array.isArray(x)
 export const isString = (x: unknown): x is string => typeof x === "string"
