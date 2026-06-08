@@ -1,3 +1,8 @@
+import {
+  type InferTypedSchema,
+  transportmanagment,
+  transportmanagmentSingle
+} from "@abapify/adt-schemas"
 import { adtException, ValidateObjectUrl } from "../AdtException"
 import { SAPRC } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
@@ -204,30 +209,53 @@ export async function createTransport(
   return transport || ""
 }
 
-export interface TransportObject {
-  "tm:pgmid": string
-  "tm:type": string
-  "tm:name": string
-  "tm:dummy_uri": string
-  "tm:obj_info": string
+type TransportManagementRoot = InferTypedSchema<typeof transportmanagment>["root"]
+type TransportManagementSingleRoot = InferTypedSchema<
+  typeof transportmanagmentSingle
+>["root"]
+type SchemaTransportTarget = NonNullable<
+  NonNullable<TransportManagementRoot["workbench"]["target"]>[number]
+>
+type SchemaTransportRequest = NonNullable<
+  NonNullable<SchemaTransportTarget["modifiable"]["request"]>[number]
+>
+type SchemaTransportTask = NonNullable<
+  NonNullable<SchemaTransportRequest["task"]>[number]
+>
+type SchemaTransportObject = NonNullable<
+  NonNullable<SchemaTransportTask["abap_object"]>[number]
+>
+type SchemaTransportLink = NonNullable<
+  NonNullable<SchemaTransportTask["link"]>[number]
+>
+type SchemaTransportRequestSingle = NonNullable<
+  TransportManagementSingleRoot["request"]
+>
+
+export type TransportObject = {
+  "tm:pgmid": NonNullable<SchemaTransportObject["pgmid"]>
+  "tm:type": NonNullable<SchemaTransportObject["type"]>
+  "tm:name": NonNullable<SchemaTransportObject["name"]>
+  "tm:dummy_uri": NonNullable<SchemaTransportObject["dummy_uri"]>
+  "tm:obj_info": NonNullable<SchemaTransportObject["obj_info"]>
 }
-export interface TransportTask {
-  "tm:number": string
-  "tm:owner": string
-  "tm:desc": string
-  "tm:status": string
-  "tm:uri": string
+export type TransportTask = {
+  "tm:number": NonNullable<SchemaTransportTask["number"]>
+  "tm:owner": NonNullable<SchemaTransportTask["owner"]>
+  "tm:desc": NonNullable<SchemaTransportTask["desc"]>
+  "tm:status": NonNullable<SchemaTransportTask["status"]>
+  "tm:uri": NonNullable<SchemaTransportTask["uri"]>
   links: Link[]
   objects: TransportObject[]
 }
 
-export interface TransportRequest extends TransportTask {
+export type TransportRequest = TransportTask & {
   tasks: TransportTask[]
 }
 
-export interface TransportTarget {
-  "tm:name": string
-  "tm:desc": string
+export type TransportTarget = {
+  "tm:name": NonNullable<SchemaTransportTarget["name"]>
+  "tm:desc": NonNullable<SchemaTransportTarget["desc"]>
   modifiable: TransportRequest[]
   released: TransportRequest[]
 }
@@ -244,93 +272,99 @@ export interface TransportsOfUser {
    */
   transportofcopies?: TransportTarget[]
 }
-const parseTask = (t: XmlNode) => {
-  const task = {
-    ...xmlNodeAttr(t),
-    links: xmlArray(t, "atom:link").map(xmlNodeAttr) as unknown as Link[],
-    objects: xmlArray(t, "tm:abap_object").map(xmlNodeAttr) as unknown as TransportObject[]
-  } as Record<string, any>
-  return task as unknown as TransportTask
-}
-const parseRequest = (r: XmlNode) => {
-  const request: TransportRequest = {
-    ...parseTask(r),
-    tasks: xmlArray(r, "tm:task").map(parseTask)
-  }
-  return request
-}
-const parseTargets = (s: XmlNode) => ({
-  ...xmlNodeAttr(s),
-  modifiable: xmlArray(s, "tm:modifiable", "tm:request").map(parseRequest),
-  released: xmlArray(s, "tm:released", "tm:request").map(parseRequest)
-}) as unknown as TransportTarget
 
-export async function transportDetails(h: AdtHTTP, transportNumber: string) {
+const arrayOrEmpty = <T>(items: T[] | undefined): T[] => items ?? []
+
+const toLink = (link: SchemaTransportLink): Link => ({
+  href: link.href,
+  rel: link.rel ?? "",
+  type: link.type,
+  title: link.title,
+  etag: typeof link.etag === "number" ? link.etag : undefined
+})
+
+const toTransportObject = (object: SchemaTransportObject): TransportObject => ({
+  "tm:pgmid": object.pgmid ?? "",
+  "tm:type": object.type ?? "",
+  "tm:name": object.name ?? "",
+  "tm:dummy_uri": object.dummy_uri ?? "",
+  "tm:obj_info": object.obj_info ?? ""
+})
+
+const toTransportTask = (
+  task: Pick<SchemaTransportTask, "number" | "owner" | "desc" | "status" | "uri" | "link" | "abap_object">
+): TransportTask => ({
+  "tm:number": task.number ?? "",
+  "tm:owner": task.owner ?? "",
+  "tm:desc": task.desc ?? "",
+  "tm:status": task.status ?? "",
+  "tm:uri": task.uri ?? "",
+  links: arrayOrEmpty(task.link).map(toLink),
+  objects: arrayOrEmpty(task.abap_object).map(toTransportObject)
+})
+
+const toTransportRequest = (
+  request: Pick<
+    SchemaTransportRequestSingle,
+    "number" | "owner" | "desc" | "status" | "uri" | "link" | "abap_object" | "task"
+  >
+): TransportRequest => ({
+  ...toTransportTask(request),
+  tasks: arrayOrEmpty(request.task).map(toTransportTask)
+})
+
+const toTransportTarget = (target: SchemaTransportTarget): TransportTarget => ({
+  "tm:name": target.name ?? "",
+  "tm:desc": target.desc ?? "",
+  modifiable: arrayOrEmpty(target.modifiable.request).map(toTransportRequest),
+  released: arrayOrEmpty(target.released.request).map(toTransportRequest)
+})
+
+const parseTransportsOfUser = (body: string): TransportsOfUser => {
+  const parsed = transportmanagment.parse(body)
+  return {
+    workbench: arrayOrEmpty(parsed.root.workbench.target).map(toTransportTarget),
+    customizing: arrayOrEmpty(parsed.root.customizing.target).map(toTransportTarget),
+    // TODO: @abapify/adt-schemas@0.4.1 has no `transportofcopies` branch in
+    // `transportmanagment`, so keep this optional bucket unset until the
+    // upstream schema covers it and we have a fixture/test for the shape.
+    transportofcopies: undefined
+  }
+}
+
+export async function transportDetails(
+  h: AdtHTTP,
+  transportNumber: string
+): Promise<TransportRequest> {
   const Accept = "application/vnd.sap.adt.transportorganizer.v1+xml"
   const url = `/sap/bc/adt/cts/transportrequests/${transportNumber}`
   const raw = await h.request(url, { headers: { Accept } })
-  const parsed = fullParse(raw.body)
-  return parseRequest(xmlNode(parsed, "tm:root", "tm:request") as XmlNode)
+  const parsed = transportmanagmentSingle.parse(raw.body)
+  return toTransportRequest(parsed.root.request ?? {})
 }
 
-export async function userTransports(h: AdtHTTP, user: string, targets = true) {
+export async function userTransports(
+  h: AdtHTTP,
+  user: string,
+  targets = true
+): Promise<TransportsOfUser> {
   const response = await h.request("/sap/bc/adt/cts/transportrequests", {
     qs: { user, targets }
   })
 
-  const raw = fullParse(response.body)
-  const workbench = xmlArray(raw, "tm:root", "tm:workbench", "tm:target").map(
-    parseTargets
-  )
-
-  const customizing = xmlArray(
-    raw,
-    "tm:root",
-    "tm:customizing",
-    "tm:target"
-  ).map(parseTargets)
-
-  const transportofcopies = xmlArray(
-    raw,
-    "tm:root",
-    "tm:transportofcopies",
-    "tm:target"
-  ).map(parseTargets)
-
-  const retval: TransportsOfUser = { workbench, customizing, transportofcopies }
-  return retval
+  return parseTransportsOfUser(response.body)
 }
 
 export async function transportsByConfig(
   h: AdtHTTP,
   configUri: string,
   targets = true
-) {
+): Promise<TransportsOfUser> {
   const response = await h.request("/sap/bc/adt/cts/transportrequests", {
     qs: { configUri, targets }
   })
 
-  const raw = fullParse(response.body)
-  const workbench = xmlArray(raw, "tm:root", "tm:workbench", "tm:target").map(
-    parseTargets
-  )
-
-  const customizing = xmlArray(
-    raw,
-    "tm:root",
-    "tm:customizing",
-    "tm:target"
-  ).map(parseTargets)
-
-  const transportofcopies = xmlArray(
-    raw,
-    "tm:root",
-    "tm:transportofcopies",
-    "tm:target"
-  ).map(parseTargets)
-
-  const retval: TransportsOfUser = { workbench, customizing, transportofcopies }
-  return retval
+  return parseTransportsOfUser(response.body)
 }
 
 const serializeTransportConfig = (cfg: TransportConfiguration) => {

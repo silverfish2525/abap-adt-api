@@ -1,14 +1,30 @@
+import { type InferTypedSchema, aunitResult } from "@abapify/adt-schemas"
 import { z } from "zod"
 import { validateShape } from ".."
 import { AdtHTTP } from "../AdtHTTP"
-import { fullParse, xmlArray, xmlFlatArray, xmlNodeAttr } from "../utilities"
+import { asXmlNode, fullParse, xmlArray, xmlNode, xmlNodeAttr } from "../utilities"
 import { parseUri, UriParts } from "./urlparser"
 
-export interface UnitTestStackEntry {
-  "adtcore:uri": string
-  "adtcore:type": string
-  "adtcore:name": string
-  "adtcore:description": string
+type AunitRunResult = InferTypedSchema<typeof aunitResult>["runResult"]
+type AunitProgram = NonNullable<NonNullable<AunitRunResult["program"]>[number]>
+type AunitClassSchema = NonNullable<
+  NonNullable<NonNullable<AunitProgram["testClasses"]>["testClass"]>[number]
+>
+type AunitMethodSchema = NonNullable<
+  NonNullable<NonNullable<AunitClassSchema["testMethods"]>["testMethod"]>[number]
+>
+type AunitAlertSchema = NonNullable<
+  NonNullable<NonNullable<AunitMethodSchema["alerts"]>["alert"]>[number]
+>
+type AunitStackEntrySchema = NonNullable<
+  NonNullable<NonNullable<AunitAlertSchema["stack"]>["stackEntry"]>[number]
+>
+
+export type UnitTestStackEntry = {
+  "adtcore:uri": NonNullable<AunitStackEntrySchema["uri"]>
+  "adtcore:type": NonNullable<AunitStackEntrySchema["type"]>
+  "adtcore:name": NonNullable<AunitStackEntrySchema["name"]>
+  "adtcore:description": NonNullable<AunitStackEntrySchema["description"]>
 }
 
 export enum UnitTestAlertKind {
@@ -29,25 +45,25 @@ export interface UnitTestAlert {
   stack: UnitTestStackEntry[]
   title: string
 }
-export interface UnitTestMethod {
-  "adtcore:uri": string
-  "adtcore:type": string
-  "adtcore:name": string
+export type UnitTestMethod = {
+  "adtcore:uri": NonNullable<AunitMethodSchema["uri"]>
+  "adtcore:type": ""
+  "adtcore:name": NonNullable<AunitMethodSchema["name"]>
   executionTime: number
-  uriType: string
+  uriType: NonNullable<AunitMethodSchema["uriType"]>
   navigationUri?: string
-  unit: string
+  unit: NonNullable<AunitMethodSchema["unit"]>
   alerts: UnitTestAlert[]
 }
 
-export interface UnitTestClass {
-  "adtcore:uri": string
-  "adtcore:type": string
-  "adtcore:name": string
-  uriType: string
+export type UnitTestClass = {
+  "adtcore:uri": NonNullable<AunitClassSchema["uri"]>
+  "adtcore:type": ""
+  "adtcore:name": NonNullable<AunitClassSchema["name"]>
+  uriType: NonNullable<AunitClassSchema["uriType"]>
   navigationUri?: string
-  durationCategory: string
-  riskLevel: string
+  durationCategory: NonNullable<AunitClassSchema["durationCategory"]>
+  riskLevel: NonNullable<AunitClassSchema["riskLevel"]>
   testmethods: UnitTestMethod[]
   alerts: UnitTestAlert[]
 }
@@ -67,26 +83,73 @@ export const isUnitTestOccurrenceMarker = (
 
 const UnitTestOccurrenceMarkerArray = z.array(UnitTestOccurrenceMarker)
 
-const parseDetail = (alert: any) =>
-  xmlArray(alert, "details", "detail").reduce((result: string[], d: any) => {
-    const main = (d && d["@_text"]) || ""
-    const children = xmlArray(d, "details", "detail")
-      .map((dd: any) => (dd && `\n\t${dd["@_text"]}`) || "")
-      .join("")
-    return main ? [...result, main + children] : result
-  }, [])
-const parseStack = (alert: any) =>
-  xmlArray(alert, "stack", "stackEntry").map(x => xmlNodeAttr(x))
-const parseAlert = (alert: any) => ({
-  ...xmlNodeAttr(alert),
+const arrayOrEmpty = <T>(items: T[] | undefined): T[] => items ?? []
+
+const toAlertKind = (kind?: string): UnitTestAlertKind => {
+  switch (kind) {
+    case UnitTestAlertKind.exception:
+      return UnitTestAlertKind.exception
+    case UnitTestAlertKind.failedAssertion:
+      return UnitTestAlertKind.failedAssertion
+    default:
+      return UnitTestAlertKind.warning
+  }
+}
+
+const toUnitTestSeverity = (severity?: string): UnitTestSeverity => {
+  switch (severity) {
+    case UnitTestSeverity.critical:
+      return UnitTestSeverity.critical
+    case UnitTestSeverity.fatal:
+      return UnitTestSeverity.fatal
+    case UnitTestSeverity.tolerable:
+      return UnitTestSeverity.tolerable
+    default:
+      return UnitTestSeverity.tolerant
+  }
+}
+
+const parseDetail = (alert: AunitAlertSchema): string[] =>
+  arrayOrEmpty(alert.details?.detail)
+    .map(detail => detail.text ?? "")
+    .filter(Boolean)
+
+const parseStack = (alert: AunitAlertSchema): UnitTestStackEntry[] =>
+  arrayOrEmpty(alert.stack?.stackEntry).map(entry => ({
+    "adtcore:uri": entry.uri ?? "",
+    "adtcore:type": entry.type ?? "",
+    "adtcore:name": entry.name ?? "",
+    "adtcore:description": entry.description ?? ""
+  }))
+
+const parseAlert = (alert: AunitAlertSchema): UnitTestAlert => ({
+  kind: toAlertKind(alert.kind),
+  severity: toUnitTestSeverity(alert.severity),
   details: parseDetail(alert),
   stack: parseStack(alert),
-  title: alert?.title || ""
-}) as unknown as UnitTestAlert
-const parseMethod = (method: any): UnitTestMethod => ({
-  ...xmlNodeAttr(method),
-  alerts: xmlArray(method, "alerts", "alert").map(parseAlert)
-}) as unknown as UnitTestMethod
+  title: alert.title ?? ""
+})
+
+const parseMethod = (method: AunitMethodSchema): UnitTestMethod => ({
+  "adtcore:uri": method.uri ?? "",
+  "adtcore:type": "",
+  "adtcore:name": method.name ?? "",
+  executionTime: Number(method.executionTime ?? 0),
+  uriType: method.uriType ?? "",
+  unit: method.unit ?? "",
+  alerts: arrayOrEmpty(method.alerts?.alert).map(parseAlert)
+})
+
+const parseClass = (clas: AunitClassSchema): UnitTestClass => ({
+  "adtcore:uri": clas.uri ?? "",
+  "adtcore:type": "",
+  "adtcore:name": clas.name ?? "",
+  uriType: clas.uriType ?? "",
+  durationCategory: clas.durationCategory ?? "",
+  riskLevel: clas.riskLevel ?? "",
+  testmethods: arrayOrEmpty(clas.testMethods?.testMethod).map(parseMethod),
+  alerts: arrayOrEmpty(clas.alerts?.alert).map(parseAlert)
+})
 
 export interface UnitTestRunFlags {
   harmless: boolean
@@ -137,22 +200,11 @@ export async function runUnitTest(
     headers,
     body
   })
-  const raw = fullParse(response.body)
+  const raw = aunitResult.parse(response.body)
 
-  const classes: UnitTestClass[] = xmlFlatArray(
-    raw,
-    "aunit:runResult",
-    "program",
-    "testClasses",
-    "testClass"
-  ).map(c => {
-    return {
-      ...xmlNodeAttr(c),
-      alerts: xmlArray(c, "alerts", "alert").map(parseAlert),
-      testmethods: xmlFlatArray(c, "testMethods", "testMethod").map(parseMethod)
-    } as unknown as UnitTestClass
-  })
-  return classes
+  return arrayOrEmpty(raw.runResult.program).flatMap(program =>
+    arrayOrEmpty(program.testClasses?.testClass).map(parseClass)
+  )
 }
 
 export async function unitTestEvaluation(
@@ -187,16 +239,12 @@ export async function unitTestEvaluation(
     body
   })
 
-  const raw = fullParse(response.body)
-  return xmlArray(
-    raw,
-    "aunit:runResult",
-    "program",
-    "testClasses",
-    "testClass",
-    "testMethods",
-    "testMethod"
-  ).map(parseMethod)
+  const raw = aunitResult.parse(response.body)
+  return arrayOrEmpty(raw.runResult.program).flatMap(program =>
+    arrayOrEmpty(program.testClasses?.testClass).flatMap(clas =>
+      arrayOrEmpty(clas.testMethods?.testMethod).map(parseMethod)
+    )
+  )
 }
 
 export async function unitTestOccurrenceMarkers(
@@ -219,8 +267,8 @@ export async function unitTestOccurrenceMarkers(
     "occurrence"
   ).map(o => {
     const { kind, keepsResult } = xmlNodeAttr(o)
-    const { uri } = xmlNodeAttr((o as any)?.objectReference)
-    return { kind, keepsResult, location: parseUri(uri as string) }
+    const { uri } = xmlNodeAttr(asXmlNode(xmlNode(o, "objectReference")))
+    return { kind, keepsResult, location: parseUri(String(uri ?? "")) }
   })
 
   return validateShape(markers, UnitTestOccurrenceMarkerArray, "UnitTestOccurrenceMarker[]")
