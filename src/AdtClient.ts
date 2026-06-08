@@ -4,7 +4,10 @@ import {
   ClientOptions,
   session_types,
   BearerFetcher,
-  HttpClient
+  HttpClient,
+  InterceptorHandle,
+  RequestInterceptor,
+  ResponseInterceptor
 } from "./AdtHTTP"
 
 import {
@@ -281,6 +284,25 @@ export class ADTClient {
 
   public get httpClient() {
     return this.h
+  }
+
+  /**
+   * Register a request interceptor on the underlying HTTP layer. Useful for
+   * injecting auth tokens, telemetry, or comm logging without reaching into
+   * private fields. Interceptors run in registration order; the returned
+   * handle removes the interceptor when disposed.
+   */
+  public addRequestInterceptor(fn: RequestInterceptor): InterceptorHandle {
+    return this.h.addRequestInterceptor(fn)
+  }
+
+  /**
+   * Register a response interceptor on the underlying HTTP layer. Runs after
+   * each call to the transport returns. The returned handle removes the
+   * interceptor when disposed.
+   */
+  public addResponseInterceptor(fn: ResponseInterceptor): InterceptorHandle {
+    return this.h.addResponseInterceptor(fn)
   }
 
   public static mainInclude(
