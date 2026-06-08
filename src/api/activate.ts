@@ -1,6 +1,7 @@
 import { adtException, ValidateObjectUrl } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
 import {
+  asXmlNode,
   fullParse,
   isArray,
   isString,
@@ -32,6 +33,7 @@ export interface ActivationResultMessage {
   href: string
   forceSupported: boolean
   shortText: string
+  longText?: string
 }
 export interface ActivationResult {
   success: boolean
@@ -128,10 +130,12 @@ export async function activate(
     const raw = fullParse(response.body)
     inactive = parseInactive(raw)
     messages = xmlArray(raw, "chkl:messages", "msg").map((m: any) => {
-      const message = xmlNodeAttr(m)
+      const message = xmlNodeAttr(asXmlNode(m))
       message.shortText = (m.shortText && m.shortText.txt) || "Syntax error"
+      const lt = m.longText && (m.longText.txt ?? m.longText)
+      if (typeof lt === "string" && lt) message.longText = lt
       return message
-    }) as ActivationResultMessage[]
+    }) as unknown as ActivationResultMessage[]
     if (inactive.length > 0) success = false
     else
       messages.some(m => {
@@ -149,8 +153,8 @@ export async function mainPrograms(h: AdtHTTP, IncludeUrl: string) {
   const includes = xmlArray(
     parsed["adtcore:objectReferences"],
     "adtcore:objectReference"
-  ).map(xmlNodeAttr)
-  return includes as MainInclude[]
+  ).map(node => xmlNodeAttr(asXmlNode(node)))
+  return includes as unknown as MainInclude[]
 }
 
 export function inactiveObjectsInResults(

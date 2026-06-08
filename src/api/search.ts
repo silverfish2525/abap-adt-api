@@ -46,7 +46,7 @@ export async function searchObject(
     "adtcore:objectReferences",
     "adtcore:objectReference"
   ).map((sr: any) => {
-    const result = xmlNodeAttr(sr)
+    const result = xmlNodeAttr(sr) as Record<string, any>
     // older systems return things like "ZREPORT (PROGRAM)"...
     const r = result["adtcore:name"].match(/([^\s]*)\s*\((.*)\)/)
     if (r) {
@@ -54,7 +54,7 @@ export async function searchObject(
       if (!result["adtcore:description"]) result["adtcore:description"] = r[2]
     }
     return result
-  }) as SearchResult[]
+  }) as unknown as SearchResult[]
 }
 
 export async function findObjectPath(h: AdtHTTP, objectUrl: string) {
@@ -70,7 +70,7 @@ export async function findObjectPath(h: AdtHTTP, objectUrl: string) {
     "projectexplorer:nodepath",
     "projectexplorer:objectLinkReferences",
     "objectLinkReference"
-  ).map(xmlNodeAttr) as PathStep[]
+  ).map(xmlNodeAttr) as unknown as PathStep[]
 }
 
 export async function abapDocumentation(

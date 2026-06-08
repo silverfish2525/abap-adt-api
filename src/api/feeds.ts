@@ -1,6 +1,7 @@
 import { Link } from "."
 import { AdtHTTP } from "../AdtHTTP"
 import {
+  asXmlNode,
   fullParse,
   xmlArray,
   xmlNodeAttr,
@@ -122,16 +123,19 @@ const parseFeeds = (body: string): Feed[] => {
       queryVariants
     }
   })
-  return feeds
+  return feeds as unknown as Feed[]
 }
 
 const parseDumps = (body: string): DumpsFeed => {
-  const raw = fullParse(body, {
-    removeNSPrefix: true,
-    processEntities: { enabled: true }
-  })?.feed
-  const { href } = xmlNodeAttr(raw?.link)
-  const { title, updated } = raw
+  const raw = asXmlNode(
+    fullParse(body, {
+      removeNSPrefix: true,
+      processEntities: { enabled: true }
+    })?.feed
+  )
+  const { href } = xmlNodeAttr(asXmlNode(raw?.link))
+  const title = String(raw?.title || "")
+  const updated = String(raw?.updated || "")
   const dumps = xmlArray(raw, "entry").map((e: any) => {
     const {
       category,
@@ -149,7 +153,7 @@ const parseDumps = (body: string): DumpsFeed => {
       type
     }
   })
-  return { href, title, updated: parseJsonDate(updated), dumps }
+  return { href, title, updated: parseJsonDate(updated), dumps } as unknown as DumpsFeed
 }
 
 export async function feeds(h: AdtHTTP) {

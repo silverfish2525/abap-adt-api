@@ -1,6 +1,6 @@
 
 import { AdtHTTP } from "../AdtHTTP"
-import { fullParse, parse, xmlArray, xmlNodeAttr } from "../utilities"
+import { asXmlNode, fullParse, parse, xmlArray, xmlNodeAttr } from "../utilities"
 
 export interface AdtDiscoveryResult {
   collection: Array<{
@@ -77,15 +77,15 @@ export async function adtCompatibilityGraph(h: AdtHTTP) {
   const edges = xmlArray(ret, "compatibility:graph", "edges", "edge").map(
     (e: any) => {
       return {
-        sourceNode: xmlNodeAttr(e.sourceNode),
-        targetNode: xmlNodeAttr(e.targetNode)
+        sourceNode: xmlNodeAttr(asXmlNode(e.sourceNode)),
+        targetNode: xmlNodeAttr(asXmlNode(e.targetNode))
       }
     }
   )
   const nodes = xmlArray(ret, "compatibility:graph", "nodes", "node").map(
     xmlNodeAttr
   )
-  return { edges, nodes } as AdtCompatibilityGraph
+  return { edges, nodes } as unknown as AdtCompatibilityGraph
 }
 
 export interface ObjectTypeDescriptor {

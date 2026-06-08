@@ -1,26 +1,34 @@
-import { Clean, parts, toInt } from "../utilities"
+import { z } from "zod"
+import { parts, toInt } from "../utilities"
 import { Location } from "./syntax"
-import * as t from "io-ts";
 
-const location = t.type({
-  line: t.number,
-  column: t.number
+const StringRecord = z.record(z.string(), z.string())
+
+export const RangePoint = z.object({
+  line: z.number(),
+  column: z.number()
 })
+export type RangePoint = z.infer<typeof RangePoint>
 
-const range = t.type({
-  start: location,
-  end: location
+export const Range = z.object({
+  start: RangePoint,
+  end: RangePoint
 })
+export type Range = z.infer<typeof Range>
 
-export const uriParts = t.type({
-  uri: t.string,
-  query: t.union([t.undefined, t.record(t.string, t.string)]),
-  range: range,
-  hashparms: t.union([t.undefined, t.record(t.string, t.string)]),
+export const UriParts = z.object({
+  uri: z.string(),
+  query: StringRecord.optional(),
+  range: Range,
+  hashparms: StringRecord.optional()
 })
+export type UriParts = z.infer<typeof UriParts>
 
-export type Range = Clean<t.TypeOf<typeof range>>
-export type UriParts = Clean<t.TypeOf<typeof uriParts>>
+export const isUriParts = (x: unknown): x is UriParts =>
+  UriParts.safeParse(x).success
+
+/** @deprecated Use `isUriParts` instead — `uriParts` was the io-ts codec, now removed. */
+export const uriParts = { is: isUriParts }
 
 export const rangeToString = (range: Range) =>
   `#start=${range.start.line},${range.start.column};end=${range.end.line},${range.end.column}`
@@ -40,10 +48,20 @@ export const uriPartsToString = (parts: UriParts) => {
   return `${parts.uri}${query ? `?${query}` : ``}${hash}`
 }
 
+const uriPartsCompatSmokeCheck: boolean = uriParts.is({
+  uri: "",
+  query: undefined,
+  range: {
+    start: { line: 0, column: 0 },
+    end: { line: 0, column: 0 }
+  },
+  hashparms: undefined
+})
+void uriPartsCompatSmokeCheck
+
 export function parseUri(sourceuri: string): UriParts {
   const [uri, qs, hash] = parts(sourceuri, /([^\?#]*)(?:\?([^#]*))?(?:#(.*))?/)
-  //
-  const query = (qs || "").split(/&/).reduce((acc: any, cur) => {
+  const query = (qs || "").split(/&/).reduce((acc: Record<string, string>, cur) => {
     const [key, val] = cur.split("=")
     if (key) acc[decodeURIComponent(key)] = decodeURIComponent(val)
     return acc
@@ -51,7 +69,7 @@ export function parseUri(sourceuri: string): UriParts {
 
   const { start, end, ...hashparms } = (hash || "")
     .split(/;/)
-    .reduce((acc: any, cur) => {
+    .reduce((acc: Record<string, string>, cur) => {
       const [key, val] = cur.split("=")
       if (key) acc[decodeURIComponent(key)] = decodeURIComponent(val)
       return acc
@@ -67,7 +85,10 @@ export function parseUri(sourceuri: string): UriParts {
     end: end ? parsePos(end) : st
   }
 
-  return { range, uri, query, hashparms }
+  return UriParts.parse({
+    range,
+    uri,
+    query,
+    hashparms
+  })
 }
-
-

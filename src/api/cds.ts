@@ -5,6 +5,7 @@ import {
   fullParse,
   isArray,
   toInt,
+  XmlNode,
   xmlArray,
   xmlNode,
   xmlNodeAttr
@@ -219,10 +220,10 @@ async function publishUnpublishServiceBinding(h: AdtHTTP, base: string, name: st
   </adtcore:objectReferences>`
   const response = await h.request(url, { headers, method: "POST", body })
   const raw = fullParse(response.body)
-  const data = xmlNode(raw, "asx:abap/asx:values/DATA")
-  const severity: string = xmlNode(data, "SEVERITY")
-  const shortText: string = xmlNode(data, "SHORT_TEXT")
-  const longText: string = xmlNode(data, "LONG_TEXT")
+  const data = xmlNode(raw, "asx:abap/asx:values/DATA") as XmlNode
+  const severity = String(xmlNode(data, "SEVERITY") || "")
+  const shortText = String(xmlNode(data, "SHORT_TEXT") || "")
+  const longText = String(xmlNode(data, "LONG_TEXT") || "")
   return { severity, shortText, longText }
 }
 

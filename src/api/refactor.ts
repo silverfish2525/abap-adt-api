@@ -5,6 +5,7 @@ import { AdtHTTP } from "../AdtHTTP"
 import {
   encodeEntity,
   fullParse,
+  XmlNode,
   xmlArray,
   xmlNode,
   xmlNodeAttr
@@ -133,8 +134,8 @@ export async function fixProposals(
   const raw = fullParse(response.body, { processEntities: false })
   const rawResults = xmlArray(raw, "qf:evaluationResults", "evaluationResult")
   return rawResults.map(x => {
-    const attrs = xmlNodeAttr(xmlNode(x, "adtcore:objectReference"))
-    const userContent = decode(xmlNode(x, "userContent") || "")
+    const attrs = xmlNodeAttr(xmlNode(x, "adtcore:objectReference") as XmlNode)
+    const userContent = decode(String(xmlNode(x, "userContent") || ""))
 
     return {
       ...attrs,
@@ -144,7 +145,7 @@ export async function fixProposals(
       line,
       column,
       userContent
-    }
+    } as unknown as FixProposal
   })
 }
 export interface Delta {
@@ -180,15 +181,15 @@ export async function fixEdits(
   })
   const raw = fullParse(response.body)
   const parseDelta = (d: any): Delta => {
-    const attr = xmlNodeAttr(xmlNode(d, "adtcore:objectReference"))
+    const attr = xmlNodeAttr(xmlNode(d, "adtcore:objectReference") as XmlNode) as Record<string, string>
     const content = d.content
-    const { uri, range } = parseUri(attr["adtcore:uri"])
+    const { uri, range } = parseUri(String(attr["adtcore:uri"] || ""))
 
     return {
       uri,
       range,
-      name: attr["adtcore:name"],
-      type: attr["adtcore:type"],
+      name: String(attr["adtcore:name"] || ""),
+      type: String(attr["adtcore:type"] || ""),
       content
     }
   }
@@ -204,8 +205,8 @@ const parsePackageGeneric = (generic: any): ChangePackageRefactoringProposal => 
     if (!o) {
         return {} as ChangePackageRefactoringProposal;
     }
-    const { uri, type, name, parentUri, packageName } = xmlNodeAttr(o);
-    const newPackage = xmlNode(xmlNode(o, "changePackageDelta"), "newPackage");
+    const { uri, type, name, parentUri, packageName } = xmlNodeAttr(o as XmlNode) as Record<string, string>;
+    const newPackage = String(xmlNode(xmlNode(o, "changePackageDelta"), "newPackage") || "");
     const affectedObjects: ChangePackageAffectedObject = {
       uri,
       type,
@@ -234,25 +235,25 @@ const parseGeneric = (generic: any): GenericRefactoring => {
     "affectedObjects",
     "affectedObject"
   ).map(o => {
-    const { uri, type, name, parentUri } = xmlNodeAttr(o)
+    const { uri, type, name, parentUri } = xmlNodeAttr(o as XmlNode) as Record<string, string>
     const textReplaceDeltas = xmlArray(
       o,
       "textReplaceDeltas",
       "textReplaceDelta"
     ).map(z => {
       return {
-        rangeFragment: parseUri(xmlNode(z, "rangeFragment")).range,
-        contentOld: xmlNode(z, "contentOld"),
-        contentNew: xmlNode(z, "contentNew")
+        rangeFragment: parseUri(String(xmlNode(z, "rangeFragment") || "")).range,
+        contentOld: String(xmlNode(z, "contentOld") || ""),
+        contentNew: String(xmlNode(z, "contentNew") || "")
       }
     })
 
     return {
-      uri,
-      type,
-      name,
-      parentUri,
-      userContent: (o as any).userContent,
+      uri: String(uri || ""),
+      type: String(type || ""),
+      name: String(name || ""),
+      parentUri: String(parentUri || ""),
+      userContent: String(o.userContent ?? ""),
       textReplaceDeltas
     }
   })
@@ -277,7 +278,7 @@ const parseGeneric = (generic: any): GenericRefactoring => {
 
 function parseChangePackageRefactoring(body: string): ChangePackageRefactoring {
   const raw = fullParse(body, { removeNSPrefix: true })
-  const root = xmlNode(raw, "changePackageRefactoring")
+  const root = xmlNode(raw, "changePackageRefactoring") as XmlNode
   const {
     ignoreSyntaxErrorsAllowed,
     ignoreSyntaxErrors,
@@ -285,7 +286,7 @@ function parseChangePackageRefactoring(body: string): ChangePackageRefactoring {
     adtObjectUri,
     affectedObjects,
     userContent
-  } = parsePackageGeneric(xmlNode(root || raw, "genericRefactoring")) // depending on the caller the generic refactoring might be wrapped or not
+  } = parsePackageGeneric(xmlNode(root || raw, "genericRefactoring") as XmlNode) // depending on the caller the generic refactoring might be wrapped or not
 
   return {
     oldPackage: affectedObjects.oldPackage || "",
@@ -301,7 +302,7 @@ function parseChangePackageRefactoring(body: string): ChangePackageRefactoring {
 
 function parseRenameRefactoring(body: string): RenameRefactoringProposal {
   const raw = fullParse(body, { removeNSPrefix: true })
-  const root = xmlNode(raw, "renameRefactoring")
+  const root = xmlNode(raw, "renameRefactoring") as XmlNode
   const {
     ignoreSyntaxErrorsAllowed,
     ignoreSyntaxErrors,
@@ -309,11 +310,11 @@ function parseRenameRefactoring(body: string): RenameRefactoringProposal {
     adtObjectUri,
     affectedObjects,
     userContent
-  } = parseGeneric(xmlNode(root || raw, "genericRefactoring")) // depending on the caller the generic refactoring might be wrapped or not
+  } = parseGeneric(xmlNode(root || raw, "genericRefactoring") as XmlNode) // depending on the caller the generic refactoring might be wrapped or not
 
   return {
-    oldName: xmlNode(root, "oldName") || "",
-    newName: xmlNode(root, "newName") || "",
+    oldName: String(xmlNode(root, "oldName") || ""),
+    newName: String(xmlNode(root, "newName") || ""),
     adtObjectUri,
     ignoreSyntaxErrorsAllowed: !!ignoreSyntaxErrorsAllowed,
     ignoreSyntaxErrors: !!ignoreSyntaxErrors,
@@ -576,9 +577,9 @@ const extractMethodBody = (proposal: ExtractMethodProposal) => {
 const parseExtractMethodEval = (body: string): ExtractMethodProposal => {
   const root = fullParse(body, {
     removeNSPrefix: true
-  }).extractMethodRefactoring
-  const parameters = xmlArray(root, "parameters", "parameter") as Parameter[]
-  const exceptions = xmlArray(root, "exceptions", "exception") as Exception[]
+  }).extractMethodRefactoring as XmlNode
+  const parameters = xmlArray(root, "parameters", "parameter") as unknown as Parameter[]
+  const exceptions = xmlArray(root, "exceptions", "exception") as unknown as Exception[]
   const {
     name,
     isStatic,
@@ -589,7 +590,7 @@ const parseExtractMethodEval = (body: string): ExtractMethodProposal => {
     isEventAllowed,
     isEvent,
     userContent
-  } = root
+  } = root as Record<string, any>
   const genericRefactoring = parseGeneric(root.genericRefactoring)
   const resp = {
     name,

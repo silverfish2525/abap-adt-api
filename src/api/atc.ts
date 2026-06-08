@@ -1,106 +1,135 @@
+import { z } from "zod"
 import { AdtHTTP } from "../AdtHTTP"
 import {
   Clean,
+  XmlNode,
+  asXmlNode,
   encodeEntity,
   fullParse,
   isString,
-  mixed,
   numberParseOptions,
-  orUndefined,
   toInt,
   xmlArray,
   xmlNode,
   xmlNodeAttr
 } from "../utilities"
-import * as t from "io-ts"
-import { adtException, isErrorMessageType, validateParseResult } from ".."
-import { parseUri, uriParts } from "./urlparser"
-const exemptionKind = t.union([
-  t.literal("A"),
-  t.literal("I"),
-  t.literal(""),
-  t.string
-]) // SATC_AC_RSLT_XMPT_KIND Atc based/Inline/none
-const proposalFinding = mixed(
-  {
-    uri: t.string,
-    type: t.string,
-    name: t.string,
-    location: t.string,
-    processor: t.string,
-    lastChangedBy: t.string,
-    priority: t.number,
-    checkId: t.string,
-    checkTitle: t.string,
-    messageId: t.string,
-    messageTitle: t.string,
-    exemptionApproval: t.string,
-    exemptionKind, // SATC_AC_RSLT_XMPT_KIND Atc based/Inline/none
-    checksum: t.number,
-    quickfixInfo: t.string
-  },
-  {
-    quickfixes: t.partial({
-      automatic: t.boolean,
-      manual: t.boolean,
-      pseudo: t.boolean
-    })
-  }
-)
+import { adtException, isErrorMessageType, validateShape } from ".."
+import { parseUri, UriParts } from "./urlparser"
 
-const restriction = t.type({
-  enabled: t.boolean,
-  singlefinding: t.boolean,
-  rangeOfFindings: t.type({
-    enabled: t.boolean,
-    restrictByObject: t.type({
-      object: t.boolean,
-      package: t.boolean,
-      subobject: t.boolean,
-      target: t.union([
-        t.literal("subobject"),
-        t.literal("object"),
-        t.literal("package"),
-        t.literal("")
-      ])
-    }),
-    restrictByCheck: t.type({
-      check: t.boolean,
-      message: t.boolean,
-      target: t.union([t.literal("message"), t.literal("check"), t.literal("")])
-    })
+export type ExemptionKind = string
+
+const StrictOptionalString = z.string().optional()
+const noPresentUndefined =
+  (keys: string[], kind: string) =>
+  (value: Record<string, unknown>, ctx: z.RefinementCtx) => {
+    for (const key of keys) {
+      if (Object.prototype.hasOwnProperty.call(value, key) && value[key] === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `expected ${kind}`
+        })
+      }
+    }
+  }
+
+const ProposalFindingQuickfixes = z
+  .object({
+    automatic: z.boolean().optional(),
+    manual: z.boolean().optional(),
+    pseudo: z.boolean().optional()
+  })
+  .superRefine(noPresentUndefined(["automatic", "manual", "pseudo"], "boolean"))
+
+export const ProposalFinding = z.object({
+  uri: z.string(),
+  type: z.string(),
+  name: z.string(),
+  location: z.string(),
+  processor: z.string(),
+  lastChangedBy: z.string(),
+  priority: z.number(),
+  checkId: z.string(),
+  checkTitle: z.string(),
+  messageId: z.string(),
+  messageTitle: z.string(),
+  exemptionApproval: z.string(),
+  exemptionKind: z.string(),
+  checksum: z.number(),
+  quickfixInfo: z.string(),
+  quickfixes: ProposalFindingQuickfixes.optional()
+})
+export type ProposalFinding = z.infer<typeof ProposalFinding>
+
+export const RestrictByObjectInner = z.object({
+  object: z.boolean(),
+  package: z.boolean(),
+  subobject: z.boolean(),
+  target: z.union([
+    z.literal("subobject"),
+    z.literal("object"),
+    z.literal("package"),
+    z.literal("")
+  ])
+})
+export type RestrictByObjectInner = z.infer<typeof RestrictByObjectInner>
+
+export const RestrictByCheckInner = z.object({
+  check: z.boolean(),
+  message: z.boolean(),
+  target: z.union([z.literal("message"), z.literal("check"), z.literal("")])
+})
+export type RestrictByCheckInner = z.infer<typeof RestrictByCheckInner>
+
+export const AtcRestriction = z.object({
+  enabled: z.boolean(),
+  singlefinding: z.boolean(),
+  rangeOfFindings: z.object({
+    enabled: z.boolean(),
+    restrictByObject: RestrictByObjectInner,
+    restrictByCheck: RestrictByCheckInner
   })
 })
+export type AtcRestriction = z.infer<typeof AtcRestriction>
 
-const atcProposal = mixed(
-  {
-    finding: t.union([proposalFinding, t.string]),
-    package: t.string,
-    subObject: t.string,
-    subObjectType: t.string,
-    subObjectTypeDescr: t.string,
-    objectTypeDescr: t.string,
-    approver: t.string,
-    reason: t.union([t.literal("FPOS"), t.literal("OTHR"), t.literal("")]),
-    justification: t.string,
-    notify: t.union([
-      t.literal("never"),
-      t.literal("on_rejection"),
-      t.literal("always")
+export const AtcProposal = z
+  .object({
+    finding: z.union([ProposalFinding, z.string()]),
+    package: z.string(),
+    subObject: z.string(),
+    subObjectType: z.string(),
+    subObjectTypeDescr: z.string(),
+    objectTypeDescr: z.string(),
+    approver: z.string(),
+    reason: z.union([z.literal("FPOS"), z.literal("OTHR"), z.literal("")]),
+    justification: z.string(),
+    notify: z.union([
+      z.literal("never"),
+      z.literal("on_rejection"),
+      z.literal("always")
     ]),
-    restriction: restriction
-  },
-  {
-    apprIsArea: t.string,
-    checkClass: t.string,
-    validUntil: t.string
-  }
-)
+    restriction: AtcRestriction,
+    apprIsArea: StrictOptionalString,
+    checkClass: StrictOptionalString,
+    validUntil: StrictOptionalString
+  })
+  .superRefine(noPresentUndefined(["apprIsArea", "checkClass", "validUntil"], "string"))
+export type AtcProposal = z.infer<typeof AtcProposal>
 
-const atcProposalMessage = t.type({
-  type: t.string,
-  message: t.string
+export const isAtcProposal = (x: unknown): x is AtcProposal =>
+  AtcProposal.safeParse(x).success
+
+export const AtcProposalMessage = z.object({
+  type: z.string(),
+  message: z.string()
 })
+export type AtcProposalMessage = z.infer<typeof AtcProposalMessage>
+
+export const isAtcProposalMessage = (x: unknown): x is AtcProposalMessage =>
+  AtcProposalMessage.safeParse(x).success
+
+export const isProposalMessage = isAtcProposalMessage
+
 export interface RestrictByObject {
   object: boolean
   package: boolean
@@ -108,89 +137,107 @@ export interface RestrictByObject {
   text: string
 }
 
-const atcRunResultInfo = t.type({
-  type: t.string,
-  description: t.string
+export const AtcRunResultInfo = z.object({
+  type: z.string(),
+  description: z.string()
 })
+export type AtcRunResultInfo = z.infer<typeof AtcRunResultInfo>
 
-const atcRunResult = t.type({
-  id: t.string,
-  timestamp: t.number,
-  infos: t.array(atcRunResultInfo)
+export const AtcRunResult = z.object({
+  id: z.string(),
+  timestamp: z.number(),
+  infos: z.array(AtcRunResultInfo)
 })
+export type AtcRunResult = z.infer<typeof AtcRunResult>
 
-const atcExcemption = t.type({
-  id: t.string,
-  justificationMandatory: t.boolean,
-  title: t.string
+export const AtcExemption = z.object({
+  id: z.string(),
+  justificationMandatory: z.boolean(),
+  title: z.string()
 })
+export type AtcExemption = z.infer<typeof AtcExemption>
 
-const atcProperty = t.type({
-  name: t.string,
-  value: t.union([t.boolean, t.string])
+export const AtcProperty = z.object({
+  name: z.string(),
+  value: z.union([z.boolean(), z.string()])
 })
+export type AtcProperty = z.infer<typeof AtcProperty>
 
-const atcCustomizingi = t.type({
-  properties: t.array(atcProperty),
-  excemptions: t.array(atcExcemption)
+export const AtcCustomizing = z.object({
+  properties: z.array(AtcProperty),
+  excemptions: z.array(AtcExemption)
 })
+export type AtcCustomizing = z.infer<typeof AtcCustomizing>
 
-const objectSet = t.type({
-  name: t.string,
-  title: t.string,
-  kind: t.string
+export const AtcObjectSet = z.object({
+  name: z.string(),
+  title: z.string(),
+  kind: z.string()
 })
+export type AtcObjectSet = z.infer<typeof AtcObjectSet>
 
-const link = t.type({
-  href: t.string,
-  rel: t.string,
-  type: t.string
+export const AtcLink = z.object({
+  href: z.string(),
+  rel: z.string(),
+  type: z.string()
 })
+export type AtcLink = z.infer<typeof AtcLink>
 
-const finding = t.type({
-  uri: t.string,
-  location: uriParts,
-  priority: t.number,
-  checkId: t.string,
-  checkTitle: t.string,
-  messageId: t.string,
-  messageTitle: t.string,
-  exemptionApproval: t.string,
-  exemptionKind,
-  quickfixInfo: orUndefined(t.string),
-  link: link
-})
-const object = t.type({
-  uri: t.string,
-  type: t.string,
-  name: t.string,
-  packageName: t.string,
-  author: t.string,
-  objectTypeId: orUndefined(t.string),
-  findings: t.array(finding)
-})
-const atcWorklist = t.type({
-  id: t.string,
-  timestamp: t.number,
-  usedObjectSet: t.string,
-  objectSetIsComplete: t.boolean,
-  objectSets: t.array(objectSet),
-  objects: t.array(object)
-})
+export const AtcFinding = z
+  .object({
+    uri: z.string(),
+    location: UriParts,
+    priority: z.number(),
+    checkId: z.string(),
+    checkTitle: z.string(),
+    messageId: z.string(),
+    messageTitle: z.string(),
+    exemptionApproval: z.string(),
+    exemptionKind: z.string(),
+    quickfixInfo: StrictOptionalString,
+    link: AtcLink
+  })
+  .superRefine(noPresentUndefined(["quickfixInfo"], "string"))
+export type AtcFinding = z.infer<typeof AtcFinding>
 
-const atcUser = t.type({
-  id: t.string,
-  title: t.string
+export const AtcObject = z
+  .object({
+    uri: z.string(),
+    type: z.string(),
+    name: z.string(),
+    packageName: z.string(),
+    author: z.string(),
+    objectTypeId: StrictOptionalString,
+    findings: z.array(AtcFinding)
+  })
+  .superRefine(noPresentUndefined(["objectTypeId"], "string"))
+export type AtcObject = z.infer<typeof AtcObject>
+
+export const AtcWorkList = z.object({
+  id: z.string(),
+  timestamp: z.number(),
+  usedObjectSet: z.string(),
+  objectSetIsComplete: z.boolean(),
+  objectSets: z.array(AtcObjectSet),
+  objects: z.array(AtcObject)
 })
+export type AtcWorkList = z.infer<typeof AtcWorkList>
 
-export type AtcRunResult = Clean<t.TypeOf<typeof atcRunResult>>
-export type AtcCustomizing = Clean<t.TypeOf<typeof atcCustomizingi>>
-export type AtcWorkList = Clean<t.TypeOf<typeof atcWorklist>>
-export type AtcUser = Clean<t.TypeOf<typeof atcUser>>
-export type AtcProposal = Clean<t.TypeOf<typeof atcProposal>>
-export type AtcProposalMessage = Clean<t.TypeOf<typeof atcProposalMessage>>
+export const AtcUser = z.object({
+  id: z.string(),
+  title: z.string()
+})
+export type AtcUser = z.infer<typeof AtcUser>
 
-export const isProposalMessage = atcProposalMessage.is
+const AtcUserArray = z.array(AtcUser)
+const StringSchema = z.string()
+
+export type AtcRunResultClean = Clean<AtcRunResult>
+export type AtcCustomizingClean = Clean<AtcCustomizing>
+export type AtcWorkListClean = Clean<AtcWorkList>
+export type AtcUserClean = Clean<AtcUser>
+export type AtcProposalClean = Clean<AtcProposal>
+export type AtcProposalMessageClean = Clean<AtcProposalMessage>
 
 export async function atcCustomizing(h: AdtHTTP): Promise<AtcCustomizing> {
   const headers = {
@@ -211,8 +258,11 @@ export async function atcCustomizing(h: AdtHTTP): Promise<AtcCustomizing> {
     "reasons",
     "reason"
   ).map(xmlNodeAttr)
-  const retval = { properties, excemptions }
-  return validateParseResult(atcCustomizingi.decode(retval))
+  return validateShape(
+    { properties, excemptions },
+    AtcCustomizing,
+    "AtcCustomizing"
+  )
 }
 
 export async function atcCheckVariant(
@@ -255,11 +305,18 @@ export async function createAtcRun(
     removeNSPrefix: true,
     parseTagValue: false
   })
-  const id = xmlNode(raw, "worklistRun", "worklistId")
-  const ts = xmlNode(raw, "worklistRun", "worklistTimestamp")
+  const id = String(xmlNode(raw, "worklistRun", "worklistId") || "")
+  const ts = String(xmlNode(raw, "worklistRun", "worklistTimestamp") || "")
   const infos = xmlArray(raw, "worklistRun", "infos", "info")
-  const retval = { id, timestamp: new Date(ts).getTime() / 1000, infos }
-  return validateParseResult(atcRunResult.decode(retval))
+  return validateShape(
+    {
+      id,
+      timestamp: new Date(ts).getTime() / 1000,
+      infos
+    },
+    AtcRunResult,
+    "AtcRunResult"
+  )
 }
 
 export async function atcWorklists(
@@ -280,15 +337,15 @@ export async function atcWorklists(
     parseTagValue: false,
     numberParseOptions
   })
-  const root = xmlNode(raw, "worklist")
-  const attrs = xmlNodeAttr(root)
+  const root = xmlNode(raw, "worklist") as XmlNode
+  const attrs = xmlNodeAttr(root) as Record<string, any>
   const objectSets = xmlArray(root, "objectSets", "objectSet").map(xmlNodeAttr)
   const objects = xmlArray(root, "objects", "object").map(o => {
     const oa = xmlNodeAttr(o)
     const findings = xmlArray(o, "findings", "finding").map(f => {
-      const fa = xmlNodeAttr(f)
+      const fa = xmlNodeAttr(f) as Record<string, any>
       const priority = toInt(fa.priority)
-      const link = xmlNodeAttr(xmlNode(f, "link"))
+      const link = xmlNodeAttr(asXmlNode(xmlNode(f, "link")))
       const location = parseUri(fa.location)
       const messageTitle = fa.messageTitle
       const checkTitle = fa.checkTitle
@@ -305,8 +362,11 @@ export async function atcWorklists(
     return { ...oa, findings }
   })
   const ts = new Date(attrs.timestamp).getTime() / 1000
-  const result = { ...attrs, timestamp: ts, objectSets, objects }
-  return validateParseResult(atcWorklist.decode(result))
+  return validateShape(
+    { ...attrs, timestamp: ts, objectSets, objects },
+    AtcWorkList,
+    "AtcWorkList"
+  )
 }
 
 export async function atcUsers(h: AdtHTTP): Promise<AtcUser[]> {
@@ -318,7 +378,7 @@ export async function atcUsers(h: AdtHTTP): Promise<AtcUser[]> {
     parseAttributeValue: false
   })
   const users = xmlArray(raw, "feed", "entry")
-  return validateParseResult(t.array(atcUser).decode(users))
+  return validateShape(users, AtcUserArray, "AtcUser[]")
 }
 
 export async function atcExemptProposal(
@@ -338,18 +398,19 @@ export async function atcExemptProposal(
     parseTagValue: false,
     parseAttributeValue: false
   })
-  const root = xmlNode(raw, "exemptionApply", "exemptionProposal")
-  const { message, type } = xmlNode(raw, "exemptionApply", "status") || {}
-  if (isErrorMessageType(type)) throw adtException(message)
-  if (message && type)
-    return validateParseResult(atcProposalMessage.decode({ message, type }))
+  const root = xmlNode(raw, "exemptionApply", "exemptionProposal") as XmlNode
+  const { message, type } = (xmlNode(raw, "exemptionApply", "status") as XmlNode) || {}
+  if (isErrorMessageType(String(type || ""))) throw adtException(String(message || ""))
+  if (message && type) {
+    return validateShape({ message, type }, AtcProposalMessage, "AtcProposalMessage")
+  }
   const finding = isString(root.finding)
     ? root.finding
-    : xmlNodeAttr(xmlNode(root, "finding"))
+    : (xmlNodeAttr(asXmlNode(xmlNode(root, "finding"))) as Record<string, any>)
   if (!isString(finding)) {
     finding.priority = toInt(finding.priority)
     finding.checksum = toInt(finding.checksum)
-    const qf = xmlNodeAttr(xmlNode(root, "finding", "quickfixes"))
+    const qf = xmlNodeAttr(asXmlNode(xmlNode(root, "finding", "quickfixes"))) as Record<string, any>
     finding.quickfixes = {
       automatic: qf.automatic === "true",
       manual: qf.manual === "true",
@@ -370,9 +431,13 @@ export async function atcExemptProposal(
     checkClass,
     validUntil
   } = root
-  const { thisFinding, rangeOfFindings } = xmlNode(root, "restriction")
-  const { restrictByObject, restrictByCheck } = rangeOfFindings
-  const result = {
+  const { thisFinding, rangeOfFindings } = (xmlNode(root, "restriction") as XmlNode)
+  const thisFindingNode = thisFinding as XmlNode
+  const rangeOfFindingsNode = rangeOfFindings as XmlNode
+  const { restrictByObject, restrictByCheck } = rangeOfFindingsNode as XmlNode
+  const restrictByObjectNode = restrictByObject as XmlNode
+  const restrictByCheckNode = restrictByCheck as XmlNode
+  return validateShape({
     finding,
     package: pa,
     subObject,
@@ -387,35 +452,34 @@ export async function atcExemptProposal(
     checkClass,
     validUntil,
     restriction: {
-      enabled: thisFinding["@_enabled"] === "true",
-      singlefinding: thisFinding["#text"] === "true",
+      enabled: thisFindingNode["@_enabled"] === "true",
+      singlefinding: thisFindingNode["#text"] === "true",
       rangeOfFindings: {
-        enabled: rangeOfFindings["@_enabled"] === "true",
+        enabled: rangeOfFindingsNode["@_enabled"] === "true",
         restrictByObject: {
-          object: restrictByObject["@_object"] === "true",
-          package: restrictByObject["@_package"] === "true",
-          subobject: restrictByObject["@_subobject"] === "true",
-          target: restrictByObject["#text"] || ""
+          object: restrictByObjectNode["@_object"] === "true",
+          package: restrictByObjectNode["@_package"] === "true",
+          subobject: restrictByObjectNode["@_subobject"] === "true",
+          target: String(restrictByObjectNode["#text"] || "")
         },
         restrictByCheck: {
-          check: restrictByCheck["@_check"] === "true",
-          message: restrictByCheck["@_message"] === "true",
-          target: restrictByCheck["#text"] || ""
+          check: restrictByCheckNode["@_check"] === "true",
+          message: restrictByCheckNode["@_message"] === "true",
+          target: String(restrictByCheckNode["#text"] || "")
         }
       }
     }
-  }
-  return validateParseResult(atcProposal.decode(result))
+  }, AtcProposal, "AtcProposal")
 }
 
 export async function atcDocumentation(h: AdtHTTP, docUri: string) {
-  const headers = { "Content-Type": "application/vnd.sap.adt.atc.items.v1+xml" }; 
+  const headers = { "Content-Type": "application/vnd.sap.adt.atc.items.v1+xml" }
   const response = await h.request(docUri, {
     headers,
     method: "GET"
   })
 
-  return response;
+  return response
 }
 
 export async function atcRequestExemption(
@@ -506,9 +570,9 @@ export async function atcRequestExemption(
     parseTagValue: false,
     parseAttributeValue: false
   })
-  const result = validateParseResult(atcProposalMessage.decode(raw?.status))
+  const result = validateShape(raw?.status, AtcProposalMessage, "AtcProposalMessage")
   if (isErrorMessageType(result.type)) throw adtException(result.message)
-  return validateParseResult(atcProposalMessage.decode(result))
+  return validateShape(result, AtcProposalMessage, "AtcProposalMessage")
 }
 
 export async function atcContactUri(
@@ -535,8 +599,8 @@ export async function atcContactUri(
     parseTagValue: false,
     parseAttributeValue: false
   })
-  const { uri } = xmlNodeAttr(xmlNode(raw, "items", "item"))
-  return validateParseResult(t.string.decode(uri))
+  const { uri } = xmlNodeAttr(asXmlNode(xmlNode(raw, "items", "item"))) as Record<string, string>
+  return validateShape(uri, StringSchema, "string")
 }
 
 export async function atcChangeContact(

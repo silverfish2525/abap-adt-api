@@ -1,5 +1,4 @@
 import { XMLParser, strnumOptions, X2jOptions } from "fast-xml-parser"
-import * as t from "io-ts"
 export { encode as encodeEntity } from "html-entities"
 import { encode } from "html-entities"
 
@@ -8,6 +7,10 @@ export const isObject = <T extends Object>(x: unknown): x is T =>
 export const isArray = <T = unknown>(x: unknown): x is T[] => Array.isArray(x)
 export const isString = (x: unknown): x is string => typeof x === "string"
 export const isNumber = (x: unknown): x is number => typeof x === "number"
+export const isXmlNode = (x: XmlValue): x is XmlNode =>
+  isObject<Record<string, XmlValue>>(x)
+export const asXmlNode = (x: XmlValue): XmlNode | undefined =>
+  isXmlNode(x) ? x : undefined
 export const isNativeError = (e: unknown): e is Error =>
   !!e && e instanceof Error
 export const isUndefined = (x: unknown): x is undefined =>
@@ -30,58 +33,69 @@ export function JSON2AbapXML(original: any, root: string = "DATA") {
   </asx:abap>`
 }
 
-export const xmlArrayType = <C extends t.Mixed>(x: C) =>
-  t.union([t.array(x), x, t.undefined])
+export type XmlPrimitive = string | number | boolean
+export interface XmlNode {
+  [key: string]: XmlValue
+}
+export type XmlValue = XmlPrimitive | XmlNode | XmlValue[] | undefined
+
 export const extractXmlArray = <T>(x: T | T[] | undefined): T[] =>
   x ? (isArray(x) ? x : [x]) : []
 
-export function xmlNode(xml: any, ...path: string[]): any {
+export function xmlNode(xml: XmlNode | XmlValue, ...path: string[]): XmlValue {
   let current = xml
 
   path.some(key => {
-    // @ts-ignore
-    if (isObject(current)) current = current[key]
+    if (isObject<Record<string, XmlValue>>(current)) current = current[key]
     return !current
   })
 
   return current
 }
 
-export function xmlFlatArray<T>(xml: any, ...path: string[]): T[] {
+export function xmlFlatArray<T = XmlNode>(
+  xml: XmlValue,
+  ...path: string[]
+): T[] {
   if (!xml) return []
 
   if (path.length === 0) {
-    if (isArray(xml)) return xml as any[]
-    else return [xml]
+    if (isArray(xml)) return xml as T[]
+    else return [xml as T]
   }
 
   if (isArray(xml))
     return xml.reduce(
-      (arr: any[], x: any) => [...arr, ...xmlFlatArray(x, ...path)],
+      (arr: T[], x) => [...arr, ...xmlFlatArray<T>(x, ...path)],
       []
     )
 
-  if (isObject(xml)) {
+  if (isObject<Record<string, XmlValue>>(xml)) {
     const [idx, ...rest] = path
-    // @ts-ignore
-    return xmlFlatArray(xml[idx], ...rest)
+    return xmlFlatArray<T>(xml[idx], ...rest)
   }
 
   return []
 }
 
-export function xmlArray<T>(xml: any, ...path: string[]): T[] {
+export function xmlArray<T = XmlNode>(
+  xml: XmlValue,
+  ...path: string[]
+): T[] {
   const node = xmlNode(xml, ...path)
   if (node) {
-    if (isArray(node)) return node as any[]
-    else return [node]
+    if (isArray(node)) return node as T[]
+    else return [node as T]
   }
 
   return []
 }
 
 const ok = Object.keys
-export const xmlRoot = (o: any) => o[ok(o).filter(k => k !== "?xml")[0]]
+export const xmlRoot = (o: XmlNode): XmlValue => {
+  const key = ok(o).find(k => k !== "?xml")
+  return key === undefined ? undefined : o[key]
+}
 
 export const stripNs = (x: any) =>
   x &&
@@ -103,14 +117,23 @@ type attribKeys<T, K = keyof T> = K extends keyof T & `@_${infer _}` ? K : never
 type attribValues<T> = { [P in attribKeys<T> as StripAttrPrefix<P>]: T[P] }
 type foo = attribValues<{ a: 1; "@_b": 2 }>
 // extract XML attributes of a node from its JSON representation
-export const xmlNodeAttr = (n: any) =>
-  n &&
-  ok(n)
-    .filter(k => k.match(/^(?!@_xmlns)@_/))
-    .reduce((part: any, cur) => {
-      part[cur.replace(/^@_/, "")] = n[cur]
-      return part
-    }, {})
+export const xmlNodeAttr = (
+  n: XmlNode | undefined
+): Partial<Record<string, XmlPrimitive>> =>
+  isObject<Record<string, XmlValue>>(n)
+    ? ok(n)
+        .filter(k => k.match(/^(?!@_xmlns)@_/))
+        .reduce((part: Partial<Record<string, XmlPrimitive>>, cur) => {
+          const value = n[cur]
+          if (
+            isString(value) ||
+            isNumber(value) ||
+            typeof value === "boolean"
+          )
+            part[cur.replace(/^@_/, "")] = value
+          return part
+        }, {})
+    : {}
 
 export const typedNodeAttr = <T = unknown>(n: T): attribValues<T> =>
   n &&
@@ -128,16 +151,19 @@ export const numberParseOptions: strnumOptions = {
   skipLike: new RegExp("")
 }
 
-export const fullParse = (xml: string, options: X2jOptions = {}) =>
+export const fullParse = (
+  xml: string,
+  options: X2jOptions = {}
+): XmlNode =>
   new XMLParser({
     ignoreAttributes: false,
     trimValues: false,
     parseAttributeValue: true,
     ...options
-  }).parse(xml)
+  }).parse(xml) as XmlNode
 
-export const parse = (xml: string, options: X2jOptions = {}) =>
-  new XMLParser(options).parse(xml)
+export const parse = (xml: string, options: X2jOptions = {}): XmlNode =>
+  new XMLParser(options).parse(xml) as XmlNode
 
 export function toInt(x?: string) {
   if (!x) return 0
@@ -194,20 +220,10 @@ export const toXmlAttributes = (o: any, prefix: string) => {
   const sep = prefix ? ":" : ""
   return o
     ? Object.getOwnPropertyNames(o)
-        .sort()
+        .toSorted()
         .map(k => `${prefix}${sep}${k.replace(/^@_/, "")}="${o[k]}"`)
         .join(" ")
     : ""
 }
 
 export type Clean<T> = Pick<T, keyof T>
-
-export const orUndefined = <T extends t.Mixed>(x: T) =>
-  t.union([t.undefined, x])
-
-export function mixed<R extends t.Props, O extends t.Props>(
-  required: R,
-  optional: O
-): t.IntersectionC<[t.TypeC<R>, t.PartialC<O>]> {
-  return t.intersection([t.type(required), t.partial(optional)])
-}

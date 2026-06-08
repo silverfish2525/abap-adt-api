@@ -1,5 +1,5 @@
 import { AdtHTTP, RequestOptions } from "../AdtHTTP"
-import { isObject, isString, parse, xmlArray } from "../utilities"
+import { XmlNode, asXmlNode, isObject, isString, parse, xmlArray } from "../utilities"
 export type NodeParents = "DEVC/K" | "PROG/P" | "FUGR/F" | "PROG/PI"
 
 export function isNodeParent(t: string): t is NodeParents {
@@ -72,8 +72,9 @@ const parsePackageResponse = (data: string): NodeStructure => {
   let objectTypes: NodeObjectType[] = []
   if (data) {
     const xml = parse(data)
-    const root = xml["asx:abap"]["asx:values"].DATA
-    nodes = xmlArray(root, "TREE_CONTENT", "SEU_ADT_REPOSITORY_OBJ_NODE")
+    const root = (asXmlNode(xml["asx:abap"]) as XmlNode)["asx:values"] as XmlNode
+    const dataNode = root.DATA as XmlNode
+    nodes = xmlArray<Node>(dataNode, "TREE_CONTENT", "SEU_ADT_REPOSITORY_OBJ_NODE")
     for (const node of nodes) {
       if (!isString(node.OBJECT_NAME)) {
         node.OBJECT_NAME = ((node.OBJECT_NAME as any) || "").toString()
@@ -81,8 +82,8 @@ const parsePackageResponse = (data: string): NodeStructure => {
       }
       node.DESCRIPTION = node.DESCRIPTION || ""
     }
-    categories = xmlArray(root, "CATEGORIES", "SEU_ADT_OBJECT_CATEGORY_INFO")
-    objectTypes = xmlArray(root, "OBJECT_TYPES", "SEU_ADT_OBJECT_TYPE_INFO")
+    categories = xmlArray<NodeCategory>(dataNode, "CATEGORIES", "SEU_ADT_OBJECT_CATEGORY_INFO")
+    objectTypes = xmlArray<NodeObjectType>(dataNode, "OBJECT_TYPES", "SEU_ADT_OBJECT_TYPE_INFO")
       .map(decodeComponents(["OBJECT_TYPE_LABEL"]))
       .map(ot => {
         const o = ot as NodeObjectType

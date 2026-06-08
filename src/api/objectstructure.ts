@@ -2,6 +2,7 @@ import { ValidateObjectUrl } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
 import {
   fullParse,
+  XmlNode,
   xmlArray,
   xmlNodeAttr,
   xmlRoot,
@@ -115,8 +116,8 @@ export function isClassStructure(
 }
 const convertIncludes = (i: any): ClassInclude => {
   const imeta = xmlNodeAttr(i)
-  const links = i["atom:link"].map(xmlNodeAttr)
-  return { ...imeta, links }
+  const links = i["atom:link"].map(xmlNodeAttr) as unknown as Link[]
+  return { ...imeta, links } as unknown as ClassInclude
 }
 
 function parseBool(val: unknown): boolean | undefined {
@@ -126,8 +127,8 @@ function parseBool(val: unknown): boolean | undefined {
 }
 
 function parseStructureElement(el: any): StructureElement {
-  const attr = xmlNodeAttr(el)
-  const links: Link[] = xmlArray(el, "atom:link").map(xmlNodeAttr)
+  const attr = xmlNodeAttr(el) as Record<string, any>
+  const links: Link[] = xmlArray(el, "atom:link").map(xmlNodeAttr) as unknown as Link[]
   const children: StructureElement[] = xmlArray(
     el,
     "abapsource:objectStructureElement"
@@ -188,14 +189,14 @@ export async function objectStructure(
   const response = await h.request(objectUrl, { qs })
   const res = fullParse(response.body)
   // return type depends on object type, but always have a single root
-  const root = xmlRoot(res)
-  const attr = xmlNodeAttr(root)
+  const root = xmlRoot(res) as XmlNode
+  const attr = xmlNodeAttr(root) as Record<string, any>
   attr["adtcore:changedAt"] = Date.parse(attr["adtcore:changedAt"]) || 0
   attr["adtcore:createdAt"] = Date.parse(attr["adtcore:createdAt"]) || 0
 
-  const links: Link[] = xmlArray(root, "atom:link").map(xmlNodeAttr)
+  const links: Link[] = xmlArray(root, "atom:link").map(xmlNodeAttr) as unknown as Link[]
 
-  const metaData: AbapMetaData = attr
+  const metaData: AbapMetaData = attr as unknown as AbapMetaData
   let result: AbapObjectStructure
   if (isClassMetaData(metaData)) {
     const includes = xmlArray(root, "class:include").map(convertIncludes)

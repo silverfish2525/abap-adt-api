@@ -779,7 +779,7 @@ ENDCLASS.`
 test("xml parser", () => {
   const xml = `<unit><content>data: x type string,
           bar type any.</content></unit>`
-  const { content } = fullParse(xml).unit
+  const { content } = fullParse(xml).unit as { content: string }
   expect(content).toMatch(/data: x type string,\n\s*bar type any./)
 })
 test(

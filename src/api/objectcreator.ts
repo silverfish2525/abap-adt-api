@@ -1,7 +1,18 @@
-import { sprintf } from "sprintf-js"
 import { adtException } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
-import { fullParse, xmlArray, encodeEntity, isString } from "../utilities"
+import {
+  fullParse,
+  xmlArray,
+  encodeEntity,
+  isString,
+  XmlNode
+} from "../utilities"
+
+// Minimal sprintf replacement: only %s substitution is used in this file.
+const sprintf = (template: string, ...args: string[]): string => {
+  let i = 0
+  return template.replace(/%s/g, () => args[i++] ?? "")
+}
 
 export type PackageTypeId = "DEVC/K"
 
@@ -242,7 +253,7 @@ export async function loadTypes(h: AdtHTTP) {
     "asx:values",
     "DATA",
     "SEU_ADT_OBJECT_TYPE_DESCRIPTOR"
-  ).map((x: any) => {
+  ).map((x: XmlNode) => {
     return { ...x, CAPABILITIES: xmlArray(x, "CAPABILITIES", "SEU_ACTION") }
   }) as ObjectType[]
 }
@@ -288,12 +299,12 @@ export async function validateNewObject(h: AdtHTTP, options: ValidateOptions) {
     qs: options
   })
   const raw = fullParse(response.body)
-  const results = xmlArray(raw, "asx:abap", "asx:values", "DATA") as any[]
+  const results = xmlArray<XmlNode>(raw, "asx:abap", "asx:values", "DATA")
   const record = (results && results[0]) || {}
 
   const { SEVERITY, SHORT_TEXT, CHECK_RESULT } = record
 
-  if (SEVERITY === "ERROR") throw adtException(record.SHORT_TEXT)
+  if (SEVERITY === "ERROR") throw adtException(String(record.SHORT_TEXT || ""))
 
   return {
     SEVERITY,
