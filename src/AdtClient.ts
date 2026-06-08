@@ -287,19 +287,34 @@ export class ADTClient {
   }
 
   /**
-   * Register a request interceptor on the underlying HTTP layer. Useful for
-   * injecting auth tokens, telemetry, or comm logging without reaching into
-   * private fields. Interceptors run in registration order; the returned
-   * handle removes the interceptor when disposed.
+   * Register a function that can read or modify outbound HTTP options
+   * before each request. Interceptors run in registration order and are
+   * awaited sequentially. If an interceptor throws, the request is not
+   * sent and the error propagates to the caller.
+   *
+   * Use cases: auth-token injection, comm logging, request shaping.
+   *
+   * @returns a handle whose dispose() removes the interceptor. Long-lived
+   *   clients should dispose interceptors that are no longer needed to
+   *   avoid unbounded retention.
    */
   public addRequestInterceptor(fn: RequestInterceptor): InterceptorHandle {
     return this.h.addRequestInterceptor(fn)
   }
 
   /**
-   * Register a response interceptor on the underlying HTTP layer. Runs after
-   * each call to the transport returns. The returned handle removes the
-   * interceptor when disposed.
+   * Register a function that can read or modify HTTP responses after they
+   * arrive but before they're returned to the caller. Runs in registration
+   * order, awaited sequentially.
+   *
+   * Note: response interceptors only fire on successful round-trips. They
+   * do NOT fire on transport-level failures (network errors, timeouts);
+   * those still propagate through the existing exception path. Retry-on-
+   * transport-failure is therefore not expressible via this API today.
+   *
+   * Use cases: response shaping, telemetry, comm logging on success/4xx/5xx.
+   *
+   * @returns a handle whose dispose() removes the interceptor.
    */
   public addResponseInterceptor(fn: ResponseInterceptor): InterceptorHandle {
     return this.h.addResponseInterceptor(fn)
