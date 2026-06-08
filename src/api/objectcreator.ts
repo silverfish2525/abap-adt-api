@@ -1,7 +1,12 @@
-import { sprintf } from "sprintf-js"
 import { adtException } from "../AdtException"
 import { AdtHTTP } from "../AdtHTTP"
 import { fullParse, xmlArray, encodeEntity, isString } from "../utilities"
+
+// Minimal sprintf replacement: only %s substitution is used in this file.
+const sprintf = (template: string, ...args: string[]): string => {
+  let i = 0
+  return template.replace(/%s/g, () => args[i++] ?? "")
+}
 
 export type PackageTypeId = "DEVC/K"
 
